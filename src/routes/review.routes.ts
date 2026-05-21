@@ -1,0 +1,25 @@
+import { Router } from "express";
+import {
+  submitReview,
+  getProductReviews,
+  approveReview,
+  deleteReview,
+} from "../controllers/review.controller";
+import { verifyJWT, verifyAdmin } from "../middleware/auth";
+
+// ─── Product review routes — mounted at /api/v1/products/:slug/reviews ───────
+// mergeParams: true gives access to :slug from the parent product router
+
+export const reviewRouter = Router({ mergeParams: true });
+
+reviewRouter.get("/", getProductReviews);
+reviewRouter.post("/", verifyJWT, submitReview);
+
+// ─── Admin review routes — mounted at /api/v1/admin/reviews ──────────────────
+
+export const adminReviewRouter = Router();
+
+adminReviewRouter.use(verifyJWT, verifyAdmin);
+
+adminReviewRouter.patch("/:id/approve", approveReview);
+adminReviewRouter.delete("/:id", deleteReview);
