@@ -5,6 +5,14 @@ import { ApiResponse } from "../utils/ApiResponse";
 import { Cart } from "../models/cart.model";
 import { Product } from "../models/product.model";
 import { Coupon } from "../models/coupon.model";
+import { Types } from "mongoose";
+
+// Accept either a MongoDB ObjectId string or a product slug
+async function resolveProduct(idOrSlug: string) {
+  return Types.ObjectId.isValid(idOrSlug)
+    ? Product.findById(idOrSlug)
+    : Product.findOne({ slug: idOrSlug });
+}
 
 // ─── Populate fields for product in cart ─────────────────────────────────────
 
@@ -70,7 +78,7 @@ export const addItem = asyncHandler(
 
     if (!productId) throw new ApiError(400, "productId is required");
 
-    const product = await Product.findById(productId);
+    const product = await resolveProduct(productId);
     if (!product) throw new ApiError(404, "Product not found");
     if (!product.isActive) throw new ApiError(400, "Product is not available");
     if (product.stock === 0) throw new ApiError(400, "Product is out of stock");
@@ -79,7 +87,7 @@ export const addItem = asyncHandler(
     if (!cart) cart = await Cart.create({ user: userId, items: [] });
 
     const existingIdx = cart.items.findIndex(
-      (i) => i.product.toString() === productId
+      (i) => i.product.toString() === product._id.toString()
     );
 
     if (existingIdx !== -1) {
@@ -111,13 +119,15 @@ export const updateItemQuantity = asyncHandler(
     if (!quantity || quantity < 1)
       throw new ApiError(400, "quantity must be at least 1");
 
-    const product = await Product.findById(productId);
+    const product = await resolveProduct(productId);
     if (!product) throw new ApiError(404, "Product not found");
 
     const cart = await Cart.findOne({ user: userId });
     if (!cart) throw new ApiError(404, "Cart not found");
 
-    const item = cart.items.find((i) => i.product.toString() === productId);
+    const item = cart.items.find(
+      (i) => i.product.toString() === product._id.toString()
+    );
     if (!item) throw new ApiError(404, "Item not in cart");
 
     item.quantity = Math.min(Number(quantity), product.stock);
@@ -138,8 +148,11 @@ export const removeItem = asyncHandler(
     const cart = await Cart.findOne({ user: userId });
     if (!cart) throw new ApiError(404, "Cart not found");
 
+    const product = await resolveProduct(productId);
+    const resolvedId = product ? product._id.toString() : productId;
+
     cart.items = cart.items.filter(
-      (i) => i.product.toString() !== productId
+      (i) => i.product.toString() !== resolvedId
     ) as typeof cart.items;
 
     await cart.save();

@@ -3,7 +3,15 @@ import { asyncHandler } from "../utils/asyncHandler";
 import { ApiError } from "../utils/ApiError";
 import { ApiResponse } from "../utils/ApiResponse";
 import { User } from "../models/user.model";
+import { Product } from "../models/product.model";
 import { Types } from "mongoose";
+
+async function resolveProductId(idOrSlug: string): Promise<string> {
+  if (Types.ObjectId.isValid(idOrSlug)) return idOrSlug;
+  const product = await Product.findOne({ slug: idOrSlug }, "_id");
+  if (!product) throw new ApiError(404, "Product not found");
+  return product._id.toString();
+}
 
 // ─── Populate fields for wishlist products ────────────────────────────────────
 
@@ -29,20 +37,17 @@ export const getWishlist = asyncHandler(
 
 export const addToWishlist = asyncHandler(
   async (req: Request, res: Response): Promise<void> => {
-    const { productId } = req.params;
-
-    if (!Types.ObjectId.isValid(productId))
-      throw new ApiError(400, "Invalid product id");
+    const resolvedId = await resolveProductId(req.params.productId);
 
     const user = await User.findById(req.user!._id);
     if (!user) throw new ApiError(404, "User not found");
 
     const alreadyAdded = user.wishlist.some(
-      (id) => id.toString() === productId
+      (id) => id.toString() === resolvedId
     );
 
     if (!alreadyAdded) {
-      user.wishlist.push(new Types.ObjectId(productId));
+      user.wishlist.push(new Types.ObjectId(resolvedId));
       await user.save();
     }
 
@@ -64,16 +69,13 @@ export const addToWishlist = asyncHandler(
 
 export const removeFromWishlist = asyncHandler(
   async (req: Request, res: Response): Promise<void> => {
-    const { productId } = req.params;
-
-    if (!Types.ObjectId.isValid(productId))
-      throw new ApiError(400, "Invalid product id");
+    const resolvedId = await resolveProductId(req.params.productId);
 
     const user = await User.findById(req.user!._id);
     if (!user) throw new ApiError(404, "User not found");
 
     user.wishlist = user.wishlist.filter(
-      (id) => id.toString() !== productId
+      (id) => id.toString() !== resolvedId
     ) as typeof user.wishlist;
 
     await user.save();
