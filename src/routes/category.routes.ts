@@ -1,6 +1,7 @@
 import { Router } from "express";
 import {
   getAllCategories,
+  getAllCategoriesAdmin,
   createCategory,
   updateCategory,
   deleteCategory,
@@ -23,3 +24,9 @@ router.patch("/:id", upload.single("image"), updateCategory);
 router.delete("/:id", deleteCategory);
 
 export default router;
+
+// ─── Admin router — all categories (including inactive) ───────────────────────
+
+export const adminCategoryRouter = Router();
+adminCategoryRouter.use(verifyJWT, verifyAdmin);
+adminCategoryRouter.get("/", getAllCategoriesAdmin);

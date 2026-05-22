@@ -259,6 +259,35 @@ export const resetPassword = asyncHandler(
   }
 );
 
+// ─── changePassword ───────────────────────────────────────────────────────────
+
+export const changePassword = asyncHandler(
+  async (req: Request, res: Response): Promise<void> => {
+    const { currentPassword, newPassword } = req.body as {
+      currentPassword: string;
+      newPassword: string;
+    };
+
+    if (!currentPassword || !newPassword) {
+      throw new ApiError(400, "currentPassword and newPassword are required");
+    }
+    if (newPassword.length < 6) {
+      throw new ApiError(400, "New password must be at least 6 characters");
+    }
+
+    const user = await User.findById(req.user!._id).select("+password");
+    if (!user) throw new ApiError(404, "User not found");
+
+    const isMatch = await user.isPasswordCorrect(currentPassword);
+    if (!isMatch) throw new ApiError(400, "Current password is incorrect");
+
+    user.password = newPassword;
+    await user.save();
+
+    res.status(200).json(new ApiResponse(200, {}, "Password changed successfully"));
+  }
+);
+
 // ─── getMe ────────────────────────────────────────────────────────────────────
 
 export const getMe = asyncHandler(async (req: Request, res: Response) => {

@@ -6,6 +6,7 @@ import {
   getUserOrders,
   getOrderByNumber,
   getAllOrders,
+  getOrderById,
   updateOrderStatus,
 } from "../controllers/order.controller";
 import { verifyJWT, verifyAdmin } from "../middleware/auth";
@@ -29,4 +30,5 @@ export const adminOrderRouter = Router();
 adminOrderRouter.use(verifyJWT, verifyAdmin);
 
 adminOrderRouter.get("/", getAllOrders);
+adminOrderRouter.get("/:id", getOrderById);
 adminOrderRouter.patch("/:id/status", updateOrderStatus);

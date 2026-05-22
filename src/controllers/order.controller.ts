@@ -517,6 +517,17 @@ export const getOrderByNumber = asyncHandler(
   }
 );
 
+// ─── GET /api/v1/admin/orders/:id ────────────────────────────────────────────
+
+export const getOrderById = asyncHandler(
+  async (req: Request, res: Response): Promise<void> => {
+    const { id } = req.params
+    const order = await Order.findById(id).populate("user", "name email phone")
+    if (!order) throw new ApiError(404, "Order not found")
+    res.status(200).json(new ApiResponse(200, { order }, "Order fetched"))
+  }
+)
+
 // ─── GET /api/v1/admin/orders ─────────────────────────────────────────────────
 
 export const getAllOrders = asyncHandler(

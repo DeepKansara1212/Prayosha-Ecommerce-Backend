@@ -26,6 +26,36 @@ async function recalculateRatings(productId: Types.ObjectId): Promise<void> {
   });
 }
 
+// ─── GET /api/v1/admin/reviews ───────────────────────────────────────────────
+
+export const getAllReviews = asyncHandler(
+  async (req: Request, res: Response): Promise<void> => {
+    const { status, page = "1", limit = "20" } = req.query as Record<string, string>
+
+    const pageNum = Math.max(1, parseInt(page, 10) || 1)
+    const limitNum = Math.min(50, Math.max(1, parseInt(limit, 10) || 20))
+    const skip = (pageNum - 1) * limitNum
+
+    const filter: Record<string, unknown> = {}
+    if (status === "pending") filter.isApproved = false
+    else if (status === "approved") filter.isApproved = true
+
+    const [reviews, total] = await Promise.all([
+      Review.find(filter)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limitNum)
+        .populate("user", "name")
+        .populate("product", "name images"),
+      Review.countDocuments(filter),
+    ])
+
+    res.status(200).json(
+      new ApiResponse(200, { reviews, pagination: paginate(pageNum, limitNum, total) }, "Reviews fetched")
+    )
+  }
+)
+
 // ─── POST /api/v1/products/:slug/reviews ─────────────────────────────────────
 
 export const submitReview = asyncHandler(

@@ -1,5 +1,6 @@
 import { Router } from "express";
 import {
+  getAllReviews,
   submitReview,
   getProductReviews,
   approveReview,
@@ -21,5 +22,6 @@ export const adminReviewRouter = Router();
 
 adminReviewRouter.use(verifyJWT, verifyAdmin);
 
+adminReviewRouter.get("/", getAllReviews);
 adminReviewRouter.patch("/:id/approve", approveReview);
 adminReviewRouter.delete("/:id", deleteReview);

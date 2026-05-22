@@ -5,6 +5,15 @@ import { ApiResponse } from "../utils/ApiResponse";
 import { Category } from "../models/category.model";
 import { Product } from "../models/product.model";
 
+// ─── GET /api/v1/admin/categories ────────────────────────────────────────────
+
+export const getAllCategoriesAdmin = asyncHandler(
+  async (_req: Request, res: Response): Promise<void> => {
+    const categories = await Category.find().sort({ sortOrder: 1, name: 1 });
+    res.status(200).json(new ApiResponse(200, { categories }, "Categories fetched"));
+  }
+);
+
 // ─── GET /api/v1/categories ───────────────────────────────────────────────────
 
 export const getAllCategories = asyncHandler(

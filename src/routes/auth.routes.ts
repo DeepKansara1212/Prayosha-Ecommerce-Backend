@@ -10,6 +10,7 @@ import {
   refreshAccessToken,
   forgotPassword,
   resetPassword,
+  changePassword,
   getMe,
   updateMe,
   addAddress,
@@ -82,8 +83,9 @@ router.post("/reset-password",   validate(resetPasswordSchema),  resetPassword);
 
 // ─── Protected routes ─────────────────────────────────────────────────────────
 
-router.post("/logout",           verifyJWT, logout);
-router.get("/me",                verifyJWT, getMe);
+router.post("/logout",              verifyJWT, logout);
+router.get("/me",                   verifyJWT, getMe);
+router.patch("/change-password",    verifyJWT, changePassword);
 router.patch("/me",              verifyJWT, validate(updateMeSchema),        updateMe);
 router.post("/me/addresses",     verifyJWT, validate(addressSchema),         addAddress);
 router.patch("/me/addresses/:id",verifyJWT, validate(updateAddressSchema),   updateAddress);
