@@ -3,8 +3,11 @@ import cors from "cors";
 import helmet from "helmet";
 import morgan from "morgan";
 import cookieParser from "cookie-parser";
+import mongoSanitize from "express-mongo-sanitize";
+import hpp from "hpp";
 import { corsOptions } from "./config/corsOptions";
 import { errorHandler } from "./middleware/errorHandler";
+import { generalLimiter, authLimiter } from "./middleware/rateLimiter";
 import { ApiResponse } from "./utils/ApiResponse";
 import authRoutes from "./routes/auth.routes";
 import categoryRoutes, { adminCategoryRouter } from "./routes/category.routes";
@@ -21,8 +24,8 @@ import newsletterRoutes from "./routes/newsletter.routes";
 
 const app = express();
 
-// Security & logging
-app.use(helmet());
+// Security headers
+app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors(corsOptions));
 app.use(morgan("dev"));
 
@@ -33,7 +36,11 @@ app.use(express.urlencoded({ extended: true, limit: "16kb" }));
 // Cookie parser (required for refreshToken cookie reads)
 app.use(cookieParser());
 
-// Health check
+// Data sanitization — must run after body parsers
+app.use(mongoSanitize());
+app.use(hpp());
+
+// Health check (no rate limit)
 app.get("/api/health", (_req: Request, res: Response) => {
   res
     .status(200)
@@ -45,6 +52,10 @@ app.get("/api/health", (_req: Request, res: Response) => {
       )
     );
 });
+
+// Rate limiting
+app.use("/api/v1/auth", authLimiter);
+app.use("/api/v1", generalLimiter);
 
 // Routes
 app.use("/api/v1/auth", authRoutes);

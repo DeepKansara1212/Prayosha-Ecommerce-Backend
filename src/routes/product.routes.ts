@@ -12,6 +12,9 @@ import {
 } from "../controllers/product.controller";
 import { verifyJWT, verifyAdmin } from "../middleware/auth";
 import { upload } from "../middleware/upload";
+import { validate } from "../middleware/validate";
+import { uploadLimiter } from "../middleware/rateLimiter";
+import { createProductSchema, updateProductSchema } from "../validations/product.validation";
 import { reviewRouter } from "./review.routes";
 
 const router = Router();
@@ -31,10 +34,10 @@ router.use("/:slug/reviews", reviewRouter);
 
 router.use(verifyJWT, verifyAdmin);
 
-router.post("/", createProduct);
-router.patch("/:id", updateProduct);
+router.post("/", validate(createProductSchema), createProduct);
+router.patch("/:id", validate(updateProductSchema), updateProduct);
 router.delete("/:id", deleteProduct);
-router.post("/:id/images", upload.array("images", 6), uploadProductImages);
+router.post("/:id/images", uploadLimiter, upload.array("images", 6), uploadProductImages);
 router.delete("/:id/images", deleteProductImage);
 
 export default router;

@@ -7,6 +7,8 @@ import {
   deleteReview,
 } from "../controllers/review.controller";
 import { verifyJWT, verifyAdmin } from "../middleware/auth";
+import { validate } from "../middleware/validate";
+import { submitReviewSchema } from "../validations/review.validation";
 
 // ─── Product review routes — mounted at /api/v1/products/:slug/reviews ───────
 // mergeParams: true gives access to :slug from the parent product router
@@ -14,7 +16,7 @@ import { verifyJWT, verifyAdmin } from "../middleware/auth";
 export const reviewRouter = Router({ mergeParams: true });
 
 reviewRouter.get("/", getProductReviews);
-reviewRouter.post("/", verifyJWT, submitReview);
+reviewRouter.post("/", verifyJWT, validate(submitReviewSchema), submitReview);
 
 // ─── Admin review routes — mounted at /api/v1/admin/reviews ──────────────────
 
