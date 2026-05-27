@@ -293,26 +293,42 @@ export const uploadProductImages = asyncHandler(
     const product = await Product.findById(req.params.id);
     if (!product) throw new ApiError(404, "Product not found");
 
+    // Ordered list of existing image URLs to keep (sent as JSON string)
+    let existingImages: string[] = [];
+    if (req.body.existingImages) {
+      try {
+        const parsed = JSON.parse(req.body.existingImages as string);
+        if (Array.isArray(parsed)) {
+          existingImages = parsed.filter((u) => typeof u === "string");
+        }
+      } catch {
+        // ignore parse error — treat as empty
+      }
+    }
+
+    // Newly uploaded files
     const files = req.files as (Express.Multer.File & { path: string })[];
-    if (!files || files.length === 0) {
-      throw new ApiError(400, "At least one image is required");
+    const newUrls = files ? files.map((f) => f.path) : [];
+
+    if (existingImages.length === 0 && newUrls.length === 0) {
+      throw new ApiError(400, "No images provided");
     }
 
-    const availableSlots = 6 - product.images.length;
-    if (availableSlots <= 0) {
-      throw new ApiError(400, "Product already has the maximum of 6 images");
+    // Delete from Cloudinary any images removed by the user
+    const toDelete = product.images.filter((img) => !existingImages.includes(img));
+    for (const imageUrl of toDelete) {
+      const match = imageUrl.match(/\/upload\/(?:v\d+\/)?(.+)\.[^.]+$/);
+      if (match?.[1]) {
+        await deleteFromCloudinary(match[1]);
+      }
     }
 
-    const toAdd = files.slice(0, availableSlots).map((f) => f.path);
-    product.images.push(...toAdd);
+    // Preserve order: existing (in new order) followed by fresh uploads, capped at 6
+    product.images = [...existingImages, ...newUrls].slice(0, 6);
     await product.save();
 
     res.status(200).json(
-      new ApiResponse(
-        200,
-        { images: product.images },
-        `${toAdd.length} image(s) uploaded`
-      )
+      new ApiResponse(200, { images: product.images }, "Images updated")
     );
   }
 );

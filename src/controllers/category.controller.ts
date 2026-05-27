@@ -103,13 +103,7 @@ export const deleteCategory = asyncHandler(
     const category = await Category.findById(id);
     if (!category) throw new ApiError(404, "Category not found");
 
-    const productCount = await Product.countDocuments({ category: id });
-    if (productCount > 0) {
-      throw new ApiError(
-        409,
-        `Cannot delete: ${productCount} product(s) are linked to this category`
-      );
-    }
+    await Product.updateMany({ category: id }, { $unset: { category: "" } });
 
     await category.deleteOne();
 
