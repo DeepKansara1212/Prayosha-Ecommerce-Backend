@@ -34,6 +34,7 @@ const registerSchema = z.object({
 const sendOtpSchema = z.object({
   phone: z.string().regex(/^\+?[0-9]{10,15}$/, "Enter a valid phone number"),
   purpose: z.enum(["login", "register"]).default("login"),
+  adminOnly: z.boolean().optional().default(false),
 });
 
 const verifyOtpSchema = z.object({

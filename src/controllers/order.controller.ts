@@ -1,7 +1,6 @@
 import { Request, Response } from "express";
 import crypto from "crypto";
 import Razorpay from "razorpay";
-import nodemailer from "nodemailer";
 import { asyncHandler } from "../utils/asyncHandler";
 import { ApiError } from "../utils/ApiError";
 import { ApiResponse } from "../utils/ApiResponse";
@@ -12,6 +11,7 @@ import { User } from "../models/user.model";
 import { Coupon, ICoupon } from "../models/coupon.model";
 import { env } from "../config/env";
 import { paginate } from "../utils/pagination";
+import { sendOrderConfirmationEmail } from "../utils/email";
 import { FilterQuery, Types } from "mongoose";
 import { IOrder } from "../models/order.model";
 
@@ -58,78 +58,6 @@ async function resolveCoupon(
       : Math.round((subtotal * coupon.discountValue) / 100);
 
   return { coupon, discountAmount };
-}
-
-async function sendOrderConfirmationEmail(
-  order: IOrder,
-  email: string
-): Promise<void> {
-  if (!env.EMAIL_USER || !env.EMAIL_PASS || !email) return;
-
-  const transporter = nodemailer.createTransport({
-    service: "gmail",
-    auth: { user: env.EMAIL_USER, pass: env.EMAIL_PASS },
-  });
-
-  const itemRows = order.items
-    .map(
-      (item) => `
-      <tr>
-        <td style="padding:8px;border:1px solid #e5e7eb;">${item.name}</td>
-        <td style="padding:8px;border:1px solid #e5e7eb;text-align:center;">${item.quantity}</td>
-        <td style="padding:8px;border:1px solid #e5e7eb;text-align:right;">₹${item.price}</td>
-        <td style="padding:8px;border:1px solid #e5e7eb;text-align:right;">₹${item.price * item.quantity}</td>
-      </tr>`
-    )
-    .join("");
-
-  const discountRow =
-    order.discount > 0
-      ? `<tr><td colspan="3" style="padding:8px;text-align:right;font-weight:bold;">Discount (${order.couponCode})</td><td style="padding:8px;text-align:right;color:#16a34a;">-₹${order.discount}</td></tr>`
-      : "";
-
-  const html = `
-    <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#111827;">
-      <h2 style="color:#7c3aed;">Order Confirmed — ${order.orderNumber}</h2>
-      <p>Thank you for shopping at <strong>Prayosha Crystals</strong>! Your order has been placed successfully.</p>
-      <table style="width:100%;border-collapse:collapse;margin:16px 0;">
-        <thead>
-          <tr style="background:#f3f4f6;">
-            <th style="padding:8px;border:1px solid #e5e7eb;text-align:left;">Product</th>
-            <th style="padding:8px;border:1px solid #e5e7eb;text-align:center;">Qty</th>
-            <th style="padding:8px;border:1px solid #e5e7eb;text-align:right;">Price</th>
-            <th style="padding:8px;border:1px solid #e5e7eb;text-align:right;">Total</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${itemRows}
-          <tr>
-            <td colspan="3" style="padding:8px;text-align:right;font-weight:bold;">Subtotal</td>
-            <td style="padding:8px;text-align:right;">₹${order.subtotal}</td>
-          </tr>
-          ${discountRow}
-          <tr>
-            <td colspan="3" style="padding:8px;text-align:right;font-weight:bold;">Shipping</td>
-            <td style="padding:8px;text-align:right;">₹${order.shippingCharge}</td>
-          </tr>
-          <tr style="background:#f3f4f6;">
-            <td colspan="3" style="padding:8px;text-align:right;font-weight:bold;font-size:16px;">Total</td>
-            <td style="padding:8px;text-align:right;font-weight:bold;font-size:16px;">₹${order.total}</td>
-          </tr>
-        </tbody>
-      </table>
-      <p><strong>Payment Method:</strong> ${order.paymentMethod === "cod" ? "Cash on Delivery" : "Online (Razorpay)"}</p>
-      <p><strong>Shipping to:</strong> ${order.shippingAddress.fullName}, ${order.shippingAddress.line1}, ${order.shippingAddress.city} — ${order.shippingAddress.pincode}</p>
-      <hr style="margin:24px 0;border:none;border-top:1px solid #e5e7eb;">
-      <p style="color:#6b7280;font-size:12px;">If you have any questions, reply to this email or contact us.</p>
-    </div>`;
-
-  await transporter.sendMail({
-    from: `"Prayosha Crystals" <${env.EMAIL_USER}>`,
-    to: email,
-    subject: `Order Confirmed — ${order.orderNumber}`,
-    html,
-  });
 }
 
 // ─── Shared cart-validation logic (used by COD and Razorpay create) ───────────
@@ -301,8 +229,8 @@ export const createOrderCOD = asyncHandler(
     cart.couponApplied = undefined;
     await cart.save();
 
-    // Send email (non-blocking, errors are swallowed so order isn't affected)
-    sendOrderConfirmationEmail(order, user.email ?? "").catch(() => {});
+    // Fire-and-forget — email.ts catches and logs failures internally
+    void sendOrderConfirmationEmail(order, user);
 
     res
       .status(201)
@@ -469,9 +397,9 @@ export const verifyRazorpayPayment = asyncHandler(
       { $set: { items: [], couponApplied: undefined } }
     );
 
-    // Send email
-    const user = await User.findById(order.user).select("email");
-    sendOrderConfirmationEmail(order, user?.email ?? "").catch(() => {});
+    // Fire-and-forget — email.ts catches and logs failures internally
+    const user = await User.findById(order.user).select("name email");
+    if (user) void sendOrderConfirmationEmail(order, user);
 
     res.status(200).json(new ApiResponse(200, order, "Payment verified successfully"));
   }

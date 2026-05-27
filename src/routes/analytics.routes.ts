@@ -4,6 +4,7 @@ import {
   getSalesOverTime,
   getOrdersByStatus,
   getLowStockProducts,
+  getRecentOrders,
 } from "../controllers/analytics.controller";
 import { verifyJWT, verifyAdmin } from "../middleware/auth";
 
@@ -15,5 +16,6 @@ router.get("/overview", getOverview);
 router.get("/sales", getSalesOverTime);
 router.get("/orders-by-status", getOrdersByStatus);
 router.get("/low-stock", getLowStockProducts);
+router.get("/recent-orders", getRecentOrders);
 
 export default router;

@@ -57,14 +57,21 @@ export const register = asyncHandler(async (req: Request, res: Response) => {
 // ─── sendOtp ──────────────────────────────────────────────────────────────────
 
 export const sendOtp = asyncHandler(async (req: Request, res: Response) => {
-  const { phone, purpose } = req.body as {
+  const { phone, purpose, adminOnly = false } = req.body as {
     phone: string;
     purpose: "login" | "register";
+    adminOnly?: boolean;
   };
 
   const user = await User.findOne({ phone });
 
-  // Always respond the same way — never reveal whether the phone exists
+  if (adminOnly) {
+    if (!user || user.role !== "admin") {
+      throw new ApiError(403, "This phone number is not registered as an admin account.");
+    }
+  }
+
+  // For non-admin flows always respond the same way — never reveal whether the phone exists
   if (user) {
     const otp = generateOtp();
     user.otp = await bcrypt.hash(otp, 10);
@@ -79,23 +86,18 @@ export const sendOtp = asyncHandler(async (req: Request, res: Response) => {
 
   res
     .status(200)
-    .json(
-      new ApiResponse(
-        200,
-        {},
-        "If this number is registered, an OTP has been sent"
-      )
-    );
+    .json(new ApiResponse(200, {}, "OTP sent successfully"));
 });
 
 // ─── verifyOtpAndLogin ────────────────────────────────────────────────────────
 
 export const verifyOtpAndLogin = asyncHandler(
   async (req: Request, res: Response) => {
-    const { phone, otp, password } = req.body as {
+    const { phone, otp, password, adminLogin = false } = req.body as {
       phone: string;
       otp: string;
       password: string;
+      adminLogin?: boolean;
     };
 
     const user = await User.findOne({ phone }).select(
@@ -116,6 +118,10 @@ export const verifyOtpAndLogin = asyncHandler(
 
     const isPasswordValid = await user.isPasswordCorrect(password);
     if (!isPasswordValid) throw new ApiError(400, "Invalid credentials");
+
+    if (adminLogin && user.role !== "admin") {
+      throw new ApiError(403, "Access denied. Admin account required.");
+    }
 
     // Clear OTP fields
     user.otp = undefined;

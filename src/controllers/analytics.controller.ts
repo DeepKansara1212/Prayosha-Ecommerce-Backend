@@ -191,6 +191,41 @@ export const getOrdersByStatus = asyncHandler(
   }
 );
 
+// ─── GET /api/v1/admin/analytics/recent-orders ───────────────────────────────
+
+export const getRecentOrders = asyncHandler(
+  async (req: Request, res: Response): Promise<void> => {
+    const rawLimit = parseInt((req.query.limit as string) ?? "10", 10);
+    const limit = isNaN(rawLimit) || rawLimit < 1 ? 10 : Math.min(rawLimit, 50);
+
+    const orders = await Order.find()
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .populate("user", "name email")
+      .select("orderNumber createdAt total paymentStatus status items user");
+
+    const data = (orders as any[]).map((o) => ({
+      orderNumber: o.orderNumber,
+      createdAt: o.createdAt,
+      total: o.total,
+      paymentStatus: o.paymentStatus,
+      status: o.status,
+      itemCount: (o.items as { quantity: number }[]).reduce(
+        (sum, item) => sum + item.quantity,
+        0
+      ),
+      customer: {
+        name: o.user?.name ?? null,
+        email: o.user?.email ?? null,
+      },
+    }));
+
+    res
+      .status(200)
+      .json(new ApiResponse(200, data, "Recent orders fetched"));
+  }
+);
+
 // ─── GET /api/v1/admin/analytics/low-stock ────────────────────────────────────
 
 export const getLowStockProducts = asyncHandler(
