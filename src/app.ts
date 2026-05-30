@@ -21,6 +21,7 @@ import { adminCustomerRouter } from "./routes/customer.routes";
 import searchRoutes from "./routes/search.routes";
 import analyticsRoutes from "./routes/analytics.routes";
 import newsletterRoutes from "./routes/newsletter.routes";
+import blogRoutes, { adminBlogRouter } from "./routes/blog.routes";
 
 const app = express();
 
@@ -72,6 +73,8 @@ app.use("/api/v1/admin/customers", adminCustomerRouter);
 app.use("/api/v1/search", searchRoutes);
 app.use("/api/v1/admin/analytics", analyticsRoutes);
 app.use("/api/v1/newsletter", newsletterRoutes);
+app.use("/api/v1/blogs", blogRoutes);
+app.use("/api/v1/admin/blogs", adminBlogRouter);
 
 // Global error handler — must be last
 app.use(errorHandler);
