@@ -220,11 +220,31 @@ export const applyCoupon = asyncHandler(
 
     cart.couponApplied = coupon.code;
     await cart.save();
+    await cart.populate("items.product", PRODUCT_FIELDS);
+
+    const annotatedItems = cart.items.map((item) => {
+      const product = item.product as any;
+      return {
+        _id: item._id,
+        product,
+        quantity: item.quantity,
+        priceAtAdd: item.priceAtAdd,
+        lineTotal: item.priceAtAdd * item.quantity,
+        unavailable: !product?.isActive || product?.stock === 0,
+      };
+    });
 
     res.status(200).json(
       new ApiResponse(
         200,
-        { couponCode: coupon.code, discountAmount, subtotal, payable: subtotal - discountAmount },
+        {
+          _id: cart._id,
+          items: annotatedItems,
+          couponApplied: cart.couponApplied,
+          subtotal,
+          itemCount: annotatedItems.reduce((s, i) => s + i.quantity, 0),
+          discountAmount,
+        },
         "Coupon applied successfully"
       )
     );

@@ -331,17 +331,14 @@ export const createRazorpayOrder = asyncHandler(
 
 export const verifyRazorpayPayment = asyncHandler(
   async (req: Request, res: Response): Promise<void> => {
-    const { razorpayOrderId, razorpayPaymentId, razorpaySignature } =
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } =
       req.body as {
-        razorpayOrderId: string;
-        razorpayPaymentId: string;
-        razorpaySignature: string;
+        razorpay_order_id: string;
+        razorpay_payment_id: string;
+        razorpay_signature: string;
       };
 
-    if (!razorpayOrderId || !razorpayPaymentId || !razorpaySignature)
-      throw new ApiError(400, "razorpayOrderId, razorpayPaymentId, and razorpaySignature are required");
-
-    const order = await Order.findOne({ razorpayOrderId });
+    const order = await Order.findOne({ razorpayOrderId: razorpay_order_id });
     if (!order) throw new ApiError(404, "Order not found");
 
     // Verify only if currently pending — prevents duplicate processing
@@ -351,10 +348,10 @@ export const verifyRazorpayPayment = asyncHandler(
     // HMAC SHA256 verification
     const expectedSignature = crypto
       .createHmac("sha256", env.RAZORPAY_KEY_SECRET!)
-      .update(`${razorpayOrderId}|${razorpayPaymentId}`)
+      .update(`${razorpay_order_id}|${razorpay_payment_id}`)
       .digest("hex");
 
-    if (expectedSignature !== razorpaySignature) {
+    if (expectedSignature !== razorpay_signature) {
       order.paymentStatus = "failed";
       order.statusHistory.push({
         status: "failed",
@@ -368,7 +365,7 @@ export const verifyRazorpayPayment = asyncHandler(
     // Payment verified — update order
     order.paymentStatus = "paid";
     order.status = "confirmed";
-    order.razorpayPaymentId = razorpayPaymentId;
+    order.razorpayPaymentId = razorpay_payment_id;
     order.statusHistory.push({
       status: "confirmed",
       note: "Payment verified via Razorpay",
