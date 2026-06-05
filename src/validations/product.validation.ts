@@ -26,6 +26,7 @@ export const createProductSchema = z.object({
   metaphysicalProperties: z.string().optional(),
   isFeatured: z.boolean().default(false),
   isActive: z.boolean().default(true),
+  hasFreeGift: z.boolean().optional(),
 });
 
 export const updateProductSchema = createProductSchema.partial();

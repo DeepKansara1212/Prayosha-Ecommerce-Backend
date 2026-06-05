@@ -52,6 +52,7 @@ export interface IUser extends Document {
   otpExpiry?: Date;      // select: false
   addresses: Types.DocumentArray<IAddress>;
   wishlist: Types.ObjectId[];
+  rewardPoints: number;
   createdAt: Date;
   updatedAt: Date;
 
@@ -89,6 +90,7 @@ const userSchema = new Schema<IUser, IUserModel>(
     otpExpiry: { type: Date, select: false },
     addresses: { type: [addressSchema], default: [] },
     wishlist: [{ type: Schema.Types.ObjectId, ref: "Product" }],
+    rewardPoints: { type: Number, default: 0, min: 0 },
   },
   { timestamps: true }
 );

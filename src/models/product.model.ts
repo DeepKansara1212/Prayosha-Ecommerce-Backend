@@ -33,6 +33,7 @@ export interface IProduct extends Document {
   metaphysicalProperties?: string;
   isFeatured: boolean;
   isActive: boolean;
+  hasFreeGift: boolean;
   ratings: IRatings;
   createdAt: Date;
   updatedAt: Date;
@@ -63,6 +64,7 @@ const productSchema = new Schema<IProduct>(
     metaphysicalProperties: { type: String },
     isFeatured: { type: Boolean, default: false },
     isActive: { type: Boolean, default: true },
+    hasFreeGift: { type: Boolean, default: false },
     ratings: {
       average: { type: Number, default: 0, min: 0, max: 5 },
       count: { type: Number, default: 0 },

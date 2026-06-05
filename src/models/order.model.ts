@@ -51,6 +51,8 @@ export interface IOrder extends Document {
   trackingNumber?: string;
   statusHistory: IStatusHistoryEntry[];
   notes?: string;
+  pointsEarned: number;
+  hasFreeGift: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -125,6 +127,8 @@ const orderSchema = new Schema<IOrder>(
     trackingNumber: { type: String },
     statusHistory: { type: [statusHistorySchema], default: [] },
     notes: { type: String },
+    pointsEarned: { type: Number, default: 0 },
+    hasFreeGift: { type: Boolean, default: false },
   },
   { timestamps: true }
 );

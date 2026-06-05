@@ -42,6 +42,11 @@ async function createIndexes(): Promise<void> {
   await carts.createIndex({ user: 1 }, { unique: true });
   console.log("✓ Cart indexes");
 
+  // ── Rewards ───────────────────────────────────────────────────────────────────
+  const rewards = db.collection("rewards");
+  await rewards.createIndex({ user: 1, createdAt: -1 });
+  console.log("✓ Reward indexes");
+
   console.log("\nAll indexes created successfully.");
   await mongoose.disconnect();
 }

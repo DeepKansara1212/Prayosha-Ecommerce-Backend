@@ -23,6 +23,8 @@ import analyticsRoutes from "./routes/analytics.routes";
 import newsletterRoutes from "./routes/newsletter.routes";
 import blogRoutes, { adminBlogRouter } from "./routes/blog.routes";
 import heroBannerRoutes, { adminHeroBannerRouter } from "./routes/heroBanner.routes";
+import rewardRouter from "./routes/reward.routes";
+import settingsRouter, { adminSettingsRouter } from "./routes/settings.routes";
 
 const app = express();
 
@@ -78,6 +80,9 @@ app.use("/api/v1/blogs", blogRoutes);
 app.use("/api/v1/admin/blogs", adminBlogRouter);
 app.use("/api/v1/hero-banners", heroBannerRoutes);
 app.use("/api/v1/admin/hero-banners", adminHeroBannerRouter);
+app.use("/api/v1/rewards", rewardRouter);
+app.use("/api/v1/settings", settingsRouter);
+app.use("/api/v1/admin/settings", adminSettingsRouter);
 
 // Global error handler — must be last
 app.use(errorHandler);

@@ -9,6 +9,9 @@ import { Cart } from "../models/cart.model";
 import { Product } from "../models/product.model";
 import { User } from "../models/user.model";
 import { Coupon, ICoupon } from "../models/coupon.model";
+import { Reward } from "../models/reward.model";
+import { Settings } from "../models/settings.model";
+import { calculatePoints } from "../utils/rewardUtils";
 import { env } from "../config/env";
 import { paginate } from "../utils/pagination";
 import { sendOrderConfirmationEmail } from "../utils/email";
@@ -112,6 +115,38 @@ async function buildOrderPayload(userId: Types.ObjectId, addressId: string) {
   );
 
   return { cart, user, address, orderItems, subtotal };
+}
+
+// ─── Shared: award points + determine free gift after successful order ────────
+
+async function applyRewardsAndGift(
+  order: IOrder,
+  userId: Types.ObjectId
+): Promise<{ pointsEarned: number; newPointsBalance: number }> {
+  const pointsEarned = calculatePoints(order.total);
+
+  await User.findByIdAndUpdate(userId, { $inc: { rewardPoints: pointsEarned } });
+  await Reward.create({
+    user: userId,
+    order: order._id,
+    pointsEarned,
+    orderTotal: order.total,
+  });
+  order.pointsEarned = pointsEarned;
+
+  const settings = await Settings.getSettings();
+  if (settings.freeGiftEnabled) {
+    order.hasFreeGift = true;
+  } else {
+    const productIds = order.items.map((item) => item.product);
+    const gifted = await Product.find({ _id: { $in: productIds }, hasFreeGift: true });
+    order.hasFreeGift = gifted.length > 0;
+  }
+
+  await order.save();
+
+  const updatedUser = await User.findById(userId).select("rewardPoints");
+  return { pointsEarned, newPointsBalance: updatedUser?.rewardPoints ?? 0 };
 }
 
 // ─── POST /api/v1/cart/coupon/validate ────────────────────────────────────────
@@ -232,9 +267,15 @@ export const createOrderCOD = asyncHandler(
     // Fire-and-forget — email.ts catches and logs failures internally
     void sendOrderConfirmationEmail(order, user);
 
-    res
-      .status(201)
-      .json(new ApiResponse(201, order, "Order placed successfully"));
+    const { pointsEarned, newPointsBalance } = await applyRewardsAndGift(order, userId);
+
+    res.status(201).json(
+      new ApiResponse(
+        201,
+        { order, pointsEarned, newPointsBalance },
+        "Order placed successfully"
+      )
+    );
   }
 );
 
@@ -398,7 +439,18 @@ export const verifyRazorpayPayment = asyncHandler(
     const user = await User.findById(order.user).select("name email");
     if (user) void sendOrderConfirmationEmail(order, user);
 
-    res.status(200).json(new ApiResponse(200, order, "Payment verified successfully"));
+    const { pointsEarned, newPointsBalance } = await applyRewardsAndGift(
+      order,
+      order.user as Types.ObjectId
+    );
+
+    res.status(200).json(
+      new ApiResponse(
+        200,
+        { order, pointsEarned, newPointsBalance },
+        "Payment verified successfully"
+      )
+    );
   }
 );
 
