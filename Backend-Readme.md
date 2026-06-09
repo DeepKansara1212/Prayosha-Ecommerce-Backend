@@ -495,14 +495,14 @@ Reward points are credited on order completion via `rewardUtils.ts`. Points are 
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| GET | `/` | Public | Active store settings (e.g. `freeGiftEnabled`) |
+| GET | `/` | Public | Active store settings (`freeGiftEnabled`, `whatsappNumber`, `whatsappDefaultMessage`) |
 
 **Admin** — `/api/v1/admin/settings`
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | GET | `/` | Admin | Full settings document |
-| PATCH | `/` | Admin | Update settings (Zod `settingsUpdateSchema`) |
+| PATCH | `/` | Admin | Update settings (Zod `settingsUpdateSchema`; accepts `freeGiftEnabled`, `whatsappNumber`, `whatsappDefaultMessage`) |
 
 Settings is a singleton document — `Settings.getSettings()` creates one on first access if none exists.
 
@@ -698,6 +698,8 @@ Singleton document — one row, created automatically on first read.
 | Field | Type | Notes |
 |---|---|---|
 | `freeGiftEnabled` | boolean | default `false`; controls storefront free-gift banner |
+| `whatsappNumber` | string | default `''`; international format without `+` (e.g. `919876543210`) |
+| `whatsappDefaultMessage` | string | default `''`; optional override for the FAB's pre-filled message |
 
 ---
 
@@ -870,7 +872,7 @@ Backend/
 | Blogs (public + admin) | ✓ | Structured content sections |
 | Hero banners (public + admin) | ✓ | Reorder, toggle, Cloudinary |
 | Rewards (balance + history) | ✓ | Points earned per order; `User.rewardPoints` |
-| Store settings (public + admin) | ✓ | Singleton; `freeGiftEnabled` toggle |
+| Store settings (public + admin) | ✓ | Singleton; `freeGiftEnabled` toggle, WhatsApp config (`whatsappNumber`, `whatsappDefaultMessage`) |
 | Rate limiting & sanitization | ✓ | |
 | Order confirmation email | ✓ | Optional |
 
