@@ -13,7 +13,11 @@ export const getPublicSettings = asyncHandler(
     res.status(200).json(
       new ApiResponse(
         200,
-        { freeGiftEnabled: settings.freeGiftEnabled },
+        {
+          freeGiftEnabled: settings.freeGiftEnabled,
+          whatsappNumber: settings.whatsappNumber,
+          whatsappDefaultMessage: settings.whatsappDefaultMessage,
+        },
         "Settings fetched"
       )
     );

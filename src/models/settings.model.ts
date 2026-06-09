@@ -2,6 +2,8 @@ import { Schema, model, Document, Model } from "mongoose";
 
 export interface ISettings extends Document {
   freeGiftEnabled: boolean;
+  whatsappNumber: string;
+  whatsappDefaultMessage: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -13,6 +15,8 @@ interface ISettingsModel extends Model<ISettings> {
 const settingsSchema = new Schema<ISettings, ISettingsModel>(
   {
     freeGiftEnabled: { type: Boolean, default: false },
+    whatsappNumber: { type: String, default: "" },
+    whatsappDefaultMessage: { type: String, default: "" },
   },
   { timestamps: true }
 );
