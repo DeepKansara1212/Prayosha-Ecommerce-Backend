@@ -42,6 +42,20 @@ const envSchema = z.object({
   // Email (optional — order confirmation emails silently skipped without it)
   EMAIL_USER: z.string().email().optional(),
   EMAIL_PASS: z.string().optional(),
+
+  // ShipRocket (optional — shipping endpoints return 503 without it)
+  SHIPROCKET_EMAIL: z.string().email().optional(),
+  SHIPROCKET_PASSWORD: z.string().optional(),
+  SHIPROCKET_CHANNEL_ID: z.string().optional(),
+  SHIPROCKET_PICKUP_LOCATION: z.string().optional(),
+  SHIPROCKET_DEFAULT_LENGTH: z.string().optional(),
+  SHIPROCKET_DEFAULT_BREADTH: z.string().optional(),
+  SHIPROCKET_DEFAULT_HEIGHT: z.string().optional(),
+  SHIPROCKET_DEFAULT_WEIGHT: z.string().optional(),
+  SHIPROCKET_WEBHOOK_TOKEN: z.string().optional(),
+
+  // AfterShip (optional — registration skipped silently without it)
+  AFTERSHIP_API_KEY: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);

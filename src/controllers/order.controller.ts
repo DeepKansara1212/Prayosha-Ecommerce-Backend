@@ -481,6 +481,19 @@ export const getUserOrders = asyncHandler(
 
 // ─── GET /api/v1/orders/:orderNumber ─────────────────────────────────────────
 
+function toCustomerOrderResponse(order: IOrder) {
+  const obj = order.toObject();
+  const {
+    shiprocketOrderId: _srOrderId,
+    shiprocketShipmentId: _srShipmentId,
+    labelUrl: _labelUrl,
+    aftershipTrackingId: _aftershipId,
+    shiprocketStatus: _srStatus,
+    ...safe
+  } = obj;
+  return safe;
+}
+
 export const getOrderByNumber = asyncHandler(
   async (req: Request, res: Response): Promise<void> => {
     const { orderNumber } = req.params;
@@ -490,7 +503,11 @@ export const getOrderByNumber = asyncHandler(
     if (order.user.toString() !== req.user!._id.toString())
       throw new ApiError(403, "You do not have access to this order");
 
-    res.status(200).json(new ApiResponse(200, order, "Order fetched"));
+    res
+      .status(200)
+      .json(
+        new ApiResponse(200, toCustomerOrderResponse(order), "Order fetched")
+      );
   }
 );
 

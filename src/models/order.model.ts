@@ -25,6 +25,12 @@ interface IStatusHistoryEntry {
   timestamp: Date;
 }
 
+interface ITrackingCheckpoint {
+  time: Date;
+  message: string;
+  location: string;
+}
+
 export interface IOrder extends Document {
   orderNumber: string;
   user: Types.ObjectId;
@@ -49,6 +55,16 @@ export interface IOrder extends Document {
     | "cancelled"
     | "refunded";
   trackingNumber?: string;
+  shiprocketOrderId?: string;
+  shiprocketShipmentId?: string;
+  awbCode?: string;
+  courierName?: string;
+  labelUrl?: string;
+  shiprocketStatus?: string;
+  aftershipTrackingId?: string;
+  aftershipStatus?: string;
+  trackingUrl?: string;
+  trackingCheckpoints?: ITrackingCheckpoint[];
   statusHistory: IStatusHistoryEntry[];
   notes?: string;
   pointsEarned: number;
@@ -91,6 +107,15 @@ const statusHistorySchema = new Schema<IStatusHistoryEntry>(
   { _id: false }
 );
 
+const trackingCheckpointSchema = new Schema<ITrackingCheckpoint>(
+  {
+    time: { type: Date, required: true },
+    message: { type: String, default: "" },
+    location: { type: String, default: "" },
+  },
+  { _id: false }
+);
+
 const orderSchema = new Schema<IOrder>(
   {
     orderNumber: { type: String, required: true, unique: true },
@@ -125,6 +150,16 @@ const orderSchema = new Schema<IOrder>(
       default: "placed",
     },
     trackingNumber: { type: String },
+    shiprocketOrderId: { type: String },
+    shiprocketShipmentId: { type: String },
+    awbCode: { type: String },
+    courierName: { type: String },
+    labelUrl: { type: String },
+    shiprocketStatus: { type: String },
+    aftershipTrackingId: { type: String },
+    aftershipStatus: { type: String },
+    trackingUrl: { type: String },
+    trackingCheckpoints: { type: [trackingCheckpointSchema], default: undefined },
     statusHistory: { type: [statusHistorySchema], default: [] },
     notes: { type: String },
     pointsEarned: { type: Number, default: 0 },

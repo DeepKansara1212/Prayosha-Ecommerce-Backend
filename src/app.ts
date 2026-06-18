@@ -25,6 +25,7 @@ import blogRoutes, { adminBlogRouter } from "./routes/blog.routes";
 import heroBannerRoutes, { adminHeroBannerRouter } from "./routes/heroBanner.routes";
 import rewardRouter from "./routes/reward.routes";
 import settingsRouter, { adminSettingsRouter } from "./routes/settings.routes";
+import { webhookRouter, adminShippingRouter } from "./routes/shipping.routes";
 
 const app = express();
 
@@ -32,6 +33,9 @@ const app = express();
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors(corsOptions));
 app.use(morgan("dev"));
+
+// Webhook routes — before global body parser (each route has its own parser)
+app.use("/api/v1/webhooks", webhookRouter);
 
 // Body parsers
 app.use(express.json({ limit: "16kb" }));
@@ -68,6 +72,7 @@ app.use("/api/v1/products", productRoutes);
 app.use("/api/v1/cart", cartRoutes);
 app.use("/api/v1/wishlist", wishlistRoutes);
 app.use("/api/v1/orders", orderRouter);
+app.use("/api/v1/admin/orders", adminShippingRouter);
 app.use("/api/v1/admin/orders", adminOrderRouter);
 app.use("/api/v1/admin/reviews", adminReviewRouter);
 app.use("/api/v1/admin/categories", adminCategoryRouter);
