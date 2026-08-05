@@ -104,16 +104,20 @@ async function shiprocketRequest<T>(
 async function resolveOrderWeight(order: IOrder): Promise<number> {
   const defaultWeight = parseFloat(env.SHIPROCKET_DEFAULT_WEIGHT || "0.5");
   const productIds = order.items.map((item) => item.product);
-  const products = await Product.find({ _id: { $in: productIds } }).select(
-    "weight"
-  );
+  const products = await Product.find({ _id: { $in: productIds } })
+    .select("useCategoryShipping shipping category")
+    .populate("category", "shipping");
 
   let totalWeight = 0;
   for (const item of order.items) {
     const product = products.find(
       (p) => p._id.toString() === item.product.toString()
     );
-    const itemWeight = product?.weight ?? defaultWeight;
+    const resolvedWeight = product?.useCategoryShipping
+      ? (product.category as unknown as { shipping?: { weight?: number } } | undefined)
+          ?.shipping?.weight
+      : product?.shipping?.weight;
+    const itemWeight = resolvedWeight ?? defaultWeight;
     totalWeight += itemWeight * item.quantity;
   }
 

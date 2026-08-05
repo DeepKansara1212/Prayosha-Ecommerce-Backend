@@ -37,6 +37,9 @@ Production-ready REST API for the **Prayosha Crystal** e-commerce platform. Buil
 | Email | Nodemailer (optional — order emails skipped without credentials) |
 | Logging | Morgan (`dev`) |
 | Security | Helmet, CORS, `express-rate-limit`, `express-mongo-sanitize`, `hpp` |
+| Astrology | `sweph` (Swiss Ephemeris, Moshier ephemeris — no data files bundled), `luxon` (IANA timezone-aware datetime math) |
+| Geocoding | Open-Meteo Geocoding API — free, unauthenticated, returns lat/lng + IANA timezone in one call |
+| Testing | Vitest (pure-logic unit tests only; no broader test suite exists yet) |
 | Dev | nodemon, ts-node |
 
 ---
@@ -82,6 +85,18 @@ npm run indexes
 # or: npx ts-node src/scripts/createIndexes.ts
 ```
 
+Seed the 12 fixed Rashis + the client-supplied Purposes/RudrakshaTypes/Purpose→RudrakshaType mappings once (see [Astrology calculators](#astrology-calculators-rashi--rudraksha)):
+
+```bash
+npm run seed:astrology
+```
+
+Run the (currently small) automated test suite:
+
+```bash
+npm test
+```
+
 ---
 
 ## Scripts
@@ -91,8 +106,10 @@ npm run indexes
 | `dev` | Start server with nodemon |
 | `build` | Compile TypeScript to `dist/` |
 | `start` | Run `dist/server.js` |
-| `lint` | ESLint on `src/**/*.ts` |
+| `lint` | ESLint on `src/**/*.ts` (not currently installed — pre-existing gap, unrelated to this feature) |
 | `indexes` | Run `createIndexes.ts` against MongoDB |
+| `seed:astrology` | Run `seedAstrologyData.ts` — seeds 12 fixed Rashis, 7 Purposes, 28 RudrakshaTypes, and 43 client-approved Purpose→RudrakshaType mappings (idempotent) |
+| `test` | Run Vitest unit tests |
 
 ---
 
@@ -130,6 +147,9 @@ RAZORPAY_KEY_SECRET=<key_secret>
 # Email (optional — order confirmation emails skipped without these)
 EMAIL_USER=<gmail_address>
 EMAIL_PASS=<app_password>
+
+# Open-Meteo geocoding (optional — has a working default, no key needed)
+OPEN_METEO_GEOCODING_URL=https://geocoding-api.open-meteo.com/v1/search
 ```
 
 **Defaults in code:** `FRONTEND_URL` defaults to `http://localhost:5174`, `ADMIN_URL` to `http://localhost:5173`. Set both to match your actual Vite ports.
@@ -147,9 +167,18 @@ src/
   middleware/       auth, validate, upload, rate limits, errors
   models/           Mongoose schemas
   routes/           Express routers
-  scripts/          createIndexes.ts
+  scripts/          createIndexes.ts, seedAstrologyData.ts
+  services/         astrology.service.ts, location.service.ts (+ providers/
+                     openMeteo.provider.ts), recommendation.service.ts — the
+                     only feature with a services layer; everything else
+                     keeps logic in controllers. Introduced deliberately here
+                     to keep astronomical calculation, location resolution,
+                     and commercial product mapping independently testable
+                     and swappable (location.service.ts is provider-agnostic
+                     — callers never touch openMeteo.provider.ts directly, so
+                     the geocoding provider can be swapped later).
   utils/            ApiError, ApiResponse, asyncHandler, pagination, sms, email
-  validations/      shared Zod schemas (product, order, review, coupon)
+  validations/      shared Zod schemas (product, order, review, coupon, calculator, ...)
   app.ts            Express app + middleware + route mounting
   server.ts         connect DB + listen
 ```
@@ -538,6 +567,45 @@ Settings is a singleton document — `Settings.getSettings()` creates one on fir
 
 ---
 
+### Astrology calculators (Rashi / Rudraksha)
+
+**Public** — `/api/v1/location`
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/search?place=<query>` | Public | Free-text place search via Open-Meteo — returns up to 5 `{ name, state?, country, countryCode, latitude, longitude, timezone, displayName }` candidates so the frontend can let the user disambiguate (e.g. multiple "Ahmedabad"s across India/Pakistan) rather than silently picking one. No matches → `200` with `locations: []` (not an error); `place` under 2 characters → `422`. Results are cached in-memory for 10 minutes per query. |
+
+**Public** — `/api/v1/calculators`
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| POST | `/bracelet` | Public | `name`, `dob`, `tob?`, `birthLocation`, `mobile`, where `birthLocation` is a full object returned by `/location/search` (never raw text — the frontend requires a selection first). Resolves the Moon Rashi server-side using `birthLocation.timezone` (never returned to the client) and recommends mapped bracelet products. If birth time is required to disambiguate, returns `{ requiresBirthTime: true }` instead. |
+| POST | `/rudraksha` | Public | `name`, `dob`, `tob?`, `birthLocation`, `mobile`, `purpose` (Purpose id). Recommends products mapped via Purpose → RudrakshaType → Product; `birthLocation` is captured for lead records only (not used in this calculation). |
+
+Both endpoints persist a `CalculatorLead` regardless of outcome. Neither endpoint calls a geocoding provider itself — resolving `birthLocation` happens entirely via `/location/search` before submission.
+
+**Public** — `/api/v1/purposes`
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/` | Public | Active purposes only, for the Rudraksha calculator's dropdown |
+
+**Admin** — one router per resource, all `verifyJWT` + `verifyAdmin`, same CRUD shape as coupons:
+
+| Base path | Notes |
+|---|---|
+| `/api/v1/admin/rashis` | Fixed 12-row reference data (seeded via `npm run seed:astrology`); `GET` includes `mappedProductCount` |
+| `/api/v1/admin/purposes` | `GET` includes `mappedRudrakshaCount` |
+| `/api/v1/admin/rudraksha-types` | `GET` includes `mappedProductCount` |
+| `/api/v1/admin/rashi-product-mappings` | `GET ?rashi=<id>` filter; populates `rashi`, `product` |
+| `/api/v1/admin/purpose-rudraksha-mappings` | `GET ?purpose=<id>` filter; populates `purpose`, `rudrakshaType` |
+| `/api/v1/admin/rudraksha-product-mappings` | `GET ?rudrakshaType=<id>` filter; populates `rudrakshaType`, `product` |
+| `/api/v1/admin/calculator-leads` | `GET` only, paginated (`search` on name/mobile) |
+
+Each mapping resource has `priority` (display order) and `active` (soft toggle) fields. `recommendation.service.ts` only returns `active` mappings pointing to `isActive && stock > 0` products.
+
+---
+
 ## Data models
 
 ### User (`users`)
@@ -703,6 +771,50 @@ Singleton document — one row, created automatically on first read.
 
 ---
 
+### Rashi (`rashis`)
+
+| Field | Type | Notes |
+|---|---|---|
+| `name`, `code` | string | code unique, e.g. `MESHA`; fixed 12-row reference data |
+
+### Purpose (`purposes`)
+
+| Field | Type | Notes |
+|---|---|---|
+| `name` | string | |
+| `active` | boolean | default true |
+
+### RudrakshaType (`rudrakshatypes`)
+
+| Field | Type | Notes |
+|---|---|---|
+| `name` | string | |
+| `description?` | string | |
+
+### RashiProductMapping / PurposeRudrakshaMapping / RudrakshaProductMapping
+
+| Field | Type | Notes |
+|---|---|---|
+| `rashi` / `purpose` / `rudrakshaType` | ObjectId | left side of the mapping |
+| `product` / `rudrakshaType` | ObjectId | right side of the mapping |
+| `priority` | number | display order, ascending |
+| `active` | boolean | default true |
+
+Indexed on `{ <left-side>: 1, active: 1 }` for fast recommendation lookups.
+
+### CalculatorLead (`calculatorleads`)
+
+| Field | Type | Notes |
+|---|---|---|
+| `name`, `mobile`, `dob` | string | captured from either calculator form |
+| `birthLocation` | subdocument | `{ displayName, name, state?, country, countryCode, latitude, longitude, timezone }` — the location the user selected from `/location/search`, stored structured so support/analytics can reuse the coordinates/timezone without re-geocoding |
+| `calculatorType` | `bracelet` \| `rudraksha` | |
+| `purpose?` | ObjectId | Rudraksha calculator only |
+
+Rashi is intentionally never stored redundantly here beyond what's needed — the lead never carries the computed Rashi code.
+
+---
+
 ## Middleware
 
 ### `verifyJWT`
@@ -774,13 +886,22 @@ Backend/
       analytics.controller.ts
       auth.controller.ts
       blog.controller.ts
+      calculator.controller.ts
+      calculatorLead.controller.ts
       cart.controller.ts
       category.controller.ts
       coupon.controller.ts
       customer.controller.ts
       heroBanner.controller.ts
+      location.controller.ts
       order.controller.ts
       product.controller.ts
+      purpose.controller.ts
+      rashi.controller.ts
+      rashiProductMapping.controller.ts
+      purposeRudrakshaMapping.controller.ts
+      rudrakshaProductMapping.controller.ts
+      rudrakshaType.controller.ts
       review.controller.ts
       reward.controller.ts
       search.controller.ts
@@ -794,6 +915,7 @@ Backend/
       validate.ts
     models/
       blog.model.ts
+      calculatorLead.model.ts
       cart.model.ts
       category.model.ts
       coupon.model.ts
@@ -801,22 +923,37 @@ Backend/
       newsletter.model.ts
       order.model.ts
       product.model.ts
+      purpose.model.ts
+      purposeRudrakshaMapping.model.ts
+      rashi.model.ts
+      rashiProductMapping.model.ts
       reward.model.ts
       review.model.ts
+      rudrakshaProductMapping.model.ts
+      rudrakshaType.model.ts
       settings.model.ts
       user.model.ts
     routes/
       analytics.routes.ts
       auth.routes.ts
       blog.routes.ts
+      calculator.routes.ts
+      calculatorLead.routes.ts
       cart.routes.ts
       category.routes.ts
       coupon.routes.ts
       customer.routes.ts
       heroBanner.routes.ts
+      location.routes.ts
       newsletter.routes.ts
       order.routes.ts
       product.routes.ts
+      purpose.routes.ts
+      rashi.routes.ts
+      rashiProductMapping.routes.ts
+      purposeRudrakshaMapping.routes.ts
+      rudrakshaProductMapping.routes.ts
+      rudrakshaType.routes.ts
       review.routes.ts
       reward.routes.ts
       search.routes.ts
@@ -824,6 +961,15 @@ Backend/
       wishlist.routes.ts
     scripts/
       createIndexes.ts
+      seedAstrologyData.ts
+    services/
+      astrology.service.ts
+      astrology.service.test.ts
+      location.service.ts
+      location.service.test.ts
+      providers/
+        openMeteo.provider.ts
+      recommendation.service.ts
     utils/
       ApiError.ts
       ApiResponse.ts
@@ -834,9 +980,17 @@ Backend/
       sms.ts
     validations/
       auth.validation.ts
+      calculator.validation.ts
       coupon.validation.ts
+      location.validation.ts
       order.validation.ts
       product.validation.ts
+      purpose.validation.ts
+      rashi.validation.ts
+      rashiProductMapping.validation.ts
+      purposeRudrakshaMapping.validation.ts
+      rudrakshaProductMapping.validation.ts
+      rudrakshaType.validation.ts
       review.validation.ts
       settings.validation.ts
     app.ts
@@ -875,6 +1029,11 @@ Backend/
 | Store settings (public + admin) | ✓ | Singleton; `freeGiftEnabled` toggle, WhatsApp config (`whatsappNumber`, `whatsappDefaultMessage`) |
 | Rate limiting & sanitization | ✓ | |
 | Order confirmation email | ✓ | Optional |
+| Bracelet calculator (sidereal Moon Rashi → products) | ✓ | Rashi never exposed in API responses; geocoding is free (Open-Meteo), no API key needed |
+| Location search (`/location/search`, Open-Meteo) | ✓ | Multi-result disambiguation — frontend never guesses which "Ahmedabad" |
+| Rudraksha calculator (Purpose → RudrakshaType → products) | ✓ | |
+| Astrology admin CRUD (Rashis, Purposes, RudrakshaTypes, 3 mapping tables) | ✓ | Purpose→RudrakshaType mappings are real, client-approved data (`Rudraksha_Purpose_Guide.pdf`); Rashi→Product and RudrakshaType→Product mappings still need real product SKUs from the client — see [Astrology calculators](#astrology-calculators-rashi--rudraksha) |
+| Calculator leads (admin, read-only) | ✓ | Paginated, searchable by name/mobile |
 
 ---
 

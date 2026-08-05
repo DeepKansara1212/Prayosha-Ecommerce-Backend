@@ -75,7 +75,7 @@ export const getProducts = asyncHandler(
         .sort(sortQuery)
         .skip(skip)
         .limit(limitNum)
-        .populate("category", "name slug")
+        .populate("category", "name slug shipping")
         .select("-costPrice"),
       Product.countDocuments(filter),
     ]);
@@ -97,7 +97,7 @@ export const getFeaturedProducts = asyncHandler(
     const products = await Product.find({ isActive: true, isFeatured: true })
       .sort({ createdAt: -1 })
       .limit(8)
-      .populate("category", "name slug")
+      .populate("category", "name slug shipping")
       .select("-costPrice");
 
     res
@@ -114,7 +114,7 @@ export const getProductBySlug = asyncHandler(
       slug: req.params.slug,
       isActive: true,
     })
-      .populate("category", "name slug")
+      .populate("category", "name slug shipping")
       .select("-costPrice");
 
     if (!product) throw new ApiError(404, "Product not found");
@@ -149,7 +149,7 @@ export const getRelatedProducts = asyncHandler(
       isActive: true,
     })
       .limit(4)
-      .populate("category", "name slug")
+      .populate("category", "name slug shipping")
       .select("-costPrice");
 
     res
@@ -177,8 +177,8 @@ export const createProduct = asyncHandler(
       badge,
       stock,
       lowStockThreshold,
-      weight,
-      dimensions,
+      useCategoryShipping,
+      shipping,
       careInstructions,
       metaphysicalProperties,
       isFeatured,
@@ -210,8 +210,8 @@ export const createProduct = asyncHandler(
       badge,
       stock: stock ?? 0,
       lowStockThreshold: lowStockThreshold ?? 5,
-      weight,
-      dimensions,
+      useCategoryShipping: useCategoryShipping ?? true,
+      shipping,
       careInstructions,
       metaphysicalProperties,
       isFeatured: isFeatured ?? false,
@@ -246,8 +246,8 @@ export const updateProduct = asyncHandler(
       "badge",
       "stock",
       "lowStockThreshold",
-      "weight",
-      "dimensions",
+      "useCategoryShipping",
+      "shipping",
       "careInstructions",
       "metaphysicalProperties",
       "isFeatured",

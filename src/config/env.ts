@@ -56,6 +56,14 @@ const envSchema = z.object({
 
   // AfterShip (optional — registration skipped silently without it)
   AFTERSHIP_API_KEY: z.string().optional(),
+
+  // Location search for astrology calculators — free, unauthenticated
+  // Open-Meteo geocoding endpoint; overridable if a self-hosted mirror is
+  // ever needed, but no API key is required.
+  OPEN_METEO_GEOCODING_URL: z
+    .string()
+    .url()
+    .default("https://geocoding-api.open-meteo.com/v1/search"),
 });
 
 const parsed = envSchema.safeParse(process.env);

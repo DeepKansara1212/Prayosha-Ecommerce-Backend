@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { validate } from "../middleware/validate";
 import { verifyJWT } from "../middleware/auth";
+import { authLimiter } from "../middleware/rateLimiter";
 import {
   register,
   sendOtp,
@@ -75,12 +76,12 @@ const updateAddressSchema = addressSchema.partial();
 
 // ─── Public routes ────────────────────────────────────────────────────────────
 
-router.post("/register",         validate(registerSchema),       register);
-router.post("/send-otp",         validate(sendOtpSchema),        sendOtp);
-router.post("/verify-otp",       validate(verifyOtpSchema),      verifyOtpAndLogin);
-router.post("/refresh-token",                                     refreshAccessToken);
-router.post("/forgot-password",  validate(forgotPasswordSchema), forgotPassword);
-router.post("/reset-password",   validate(resetPasswordSchema),  resetPassword);
+router.post("/register",         authLimiter, validate(registerSchema),       register);
+router.post("/send-otp",         authLimiter, validate(sendOtpSchema),        sendOtp);
+router.post("/verify-otp",       authLimiter, validate(verifyOtpSchema),      verifyOtpAndLogin);
+router.post("/refresh-token",                                                   refreshAccessToken);
+router.post("/forgot-password",  authLimiter, validate(forgotPasswordSchema), forgotPassword);
+router.post("/reset-password",   authLimiter, validate(resetPasswordSchema),  resetPassword);
 
 // ─── Protected routes ─────────────────────────────────────────────────────────
 

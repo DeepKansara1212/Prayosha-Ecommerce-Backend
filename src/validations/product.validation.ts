@@ -1,9 +1,10 @@
 import { z } from "zod";
 
-const dimensionsSchema = z.object({
-  l: z.number().min(0),
-  w: z.number().min(0),
-  h: z.number().min(0),
+const shippingSchema = z.object({
+  weight: z.number().min(0).optional(),
+  length: z.number().min(0).optional(),
+  breadth: z.number().min(0).optional(),
+  height: z.number().min(0).optional(),
 });
 
 export const createProductSchema = z.object({
@@ -20,8 +21,8 @@ export const createProductSchema = z.object({
   badge: z.enum(["BESTSELLER", "NEW", "LIMITED", "RARE", "GIFT SET"]).optional(),
   stock: z.number().int().min(0).default(0),
   lowStockThreshold: z.number().int().min(0).default(5),
-  weight: z.number().min(0).optional(),
-  dimensions: dimensionsSchema.optional(),
+  useCategoryShipping: z.boolean().optional().default(true),
+  shipping: shippingSchema.optional(),
   careInstructions: z.string().optional(),
   metaphysicalProperties: z.string().optional(),
   isFeatured: z.boolean().default(false),

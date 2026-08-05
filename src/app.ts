@@ -7,7 +7,7 @@ import mongoSanitize from "express-mongo-sanitize";
 import hpp from "hpp";
 import { corsOptions } from "./config/corsOptions";
 import { errorHandler } from "./middleware/errorHandler";
-import { generalLimiter, authLimiter } from "./middleware/rateLimiter";
+import { generalLimiter } from "./middleware/rateLimiter";
 import { ApiResponse } from "./utils/ApiResponse";
 import authRoutes from "./routes/auth.routes";
 import categoryRoutes, { adminCategoryRouter } from "./routes/category.routes";
@@ -26,6 +26,15 @@ import heroBannerRoutes, { adminHeroBannerRouter } from "./routes/heroBanner.rou
 import rewardRouter from "./routes/reward.routes";
 import settingsRouter, { adminSettingsRouter } from "./routes/settings.routes";
 import { webhookRouter, adminShippingRouter } from "./routes/shipping.routes";
+import calculatorRoutes from "./routes/calculator.routes";
+import locationRoutes from "./routes/location.routes";
+import purposeRoutes, { adminPurposeRouter } from "./routes/purpose.routes";
+import { adminRashiRouter } from "./routes/rashi.routes";
+import { adminRudrakshaTypeRouter } from "./routes/rudrakshaType.routes";
+import { adminRashiProductMappingRouter } from "./routes/rashiProductMapping.routes";
+import { adminPurposeRudrakshaMappingRouter } from "./routes/purposeRudrakshaMapping.routes";
+import { adminRudrakshaProductMappingRouter } from "./routes/rudrakshaProductMapping.routes";
+import { adminCalculatorLeadRouter } from "./routes/calculatorLead.routes";
 
 const app = express();
 
@@ -62,7 +71,6 @@ app.get("/api/health", (_req: Request, res: Response) => {
 });
 
 // Rate limiting
-app.use("/api/v1/auth", authLimiter);
 app.use("/api/v1", generalLimiter);
 
 // Routes
@@ -88,6 +96,16 @@ app.use("/api/v1/admin/hero-banners", adminHeroBannerRouter);
 app.use("/api/v1/rewards", rewardRouter);
 app.use("/api/v1/settings", settingsRouter);
 app.use("/api/v1/admin/settings", adminSettingsRouter);
+app.use("/api/v1/calculators", calculatorRoutes);
+app.use("/api/v1/location", locationRoutes);
+app.use("/api/v1/purposes", purposeRoutes);
+app.use("/api/v1/admin/purposes", adminPurposeRouter);
+app.use("/api/v1/admin/rashis", adminRashiRouter);
+app.use("/api/v1/admin/rudraksha-types", adminRudrakshaTypeRouter);
+app.use("/api/v1/admin/rashi-product-mappings", adminRashiProductMappingRouter);
+app.use("/api/v1/admin/purpose-rudraksha-mappings", adminPurposeRudrakshaMappingRouter);
+app.use("/api/v1/admin/rudraksha-product-mappings", adminRudrakshaProductMappingRouter);
+app.use("/api/v1/admin/calculator-leads", adminCalculatorLeadRouter);
 
 // Global error handler — must be last
 app.use(errorHandler);

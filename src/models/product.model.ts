@@ -1,9 +1,10 @@
 import { Schema, model, Document, Types } from "mongoose";
 
-interface IDimensions {
-  l: number;
-  w: number;
-  h: number;
+export interface IProductShipping {
+  weight?: number;
+  length?: number;
+  breadth?: number;
+  height?: number;
 }
 
 interface IRatings {
@@ -27,8 +28,8 @@ export interface IProduct extends Document {
   badge?: "BESTSELLER" | "NEW" | "LIMITED" | "RARE" | "GIFT SET";
   stock: number;
   lowStockThreshold: number;
-  weight?: number;
-  dimensions?: IDimensions;
+  useCategoryShipping: boolean;
+  shipping?: IProductShipping;
   careInstructions?: string;
   metaphysicalProperties?: string;
   isFeatured: boolean;
@@ -56,9 +57,17 @@ const productSchema = new Schema<IProduct>(
     badge: { type: String, enum: ["BESTSELLER", "NEW", "LIMITED", "RARE", "GIFT SET"] },
     stock: { type: Number, required: true, default: 0, min: 0 },
     lowStockThreshold: { type: Number, default: 5 },
-    weight: { type: Number },
-    dimensions: {
-      type: new Schema<IDimensions>({ l: Number, w: Number, h: Number }, { _id: false }),
+    useCategoryShipping: { type: Boolean, default: true },
+    shipping: {
+      type: new Schema<IProductShipping>(
+        {
+          weight: { type: Number, min: 0 },
+          length: { type: Number, min: 0 },
+          breadth: { type: Number, min: 0 },
+          height: { type: Number, min: 0 },
+        },
+        { _id: false }
+      ),
     },
     careInstructions: { type: String },
     metaphysicalProperties: { type: String },

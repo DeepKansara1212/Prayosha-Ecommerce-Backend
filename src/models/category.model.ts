@@ -1,5 +1,12 @@
 import { Schema, model, Document } from "mongoose";
 
+export interface ICategoryShipping {
+  weight: number;
+  length?: number;
+  breadth?: number;
+  height?: number;
+}
+
 export interface ICategory extends Document {
   name: string;
   slug: string;
@@ -7,6 +14,7 @@ export interface ICategory extends Document {
   image?: string;
   isActive: boolean;
   sortOrder: number;
+  shipping: ICategoryShipping;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -19,6 +27,18 @@ const categorySchema = new Schema<ICategory>(
     image: { type: String },
     isActive: { type: Boolean, default: true },
     sortOrder: { type: Number, default: 0 },
+    shipping: {
+      type: new Schema<ICategoryShipping>(
+        {
+          weight: { type: Number, required: true, min: 0 },
+          length: { type: Number, min: 0 },
+          breadth: { type: Number, min: 0 },
+          height: { type: Number, min: 0 },
+        },
+        { _id: false }
+      ),
+      required: true,
+    },
   },
   { timestamps: true }
 );

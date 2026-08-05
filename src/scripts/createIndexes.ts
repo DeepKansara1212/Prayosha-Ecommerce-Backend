@@ -47,6 +47,31 @@ async function createIndexes(): Promise<void> {
   await rewards.createIndex({ user: 1, createdAt: -1 });
   console.log("✓ Reward indexes");
 
+  // ── Astrology Calculators ───────────────────────────────────────────────────
+  const rashis = db.collection("rashis");
+  await rashis.createIndex({ code: 1 }, { unique: true });
+  console.log("✓ Rashi indexes");
+
+  const purposes = db.collection("purposes");
+  await purposes.createIndex({ active: 1 });
+  console.log("✓ Purpose indexes");
+
+  const rashiProductMappings = db.collection("rashiproductmappings");
+  await rashiProductMappings.createIndex({ rashi: 1, active: 1 });
+  console.log("✓ RashiProductMapping indexes");
+
+  const purposeRudrakshaMappings = db.collection("purposerudrakshamappings");
+  await purposeRudrakshaMappings.createIndex({ purpose: 1, active: 1 });
+  console.log("✓ PurposeRudrakshaMapping indexes");
+
+  const rudrakshaProductMappings = db.collection("rudrakshaproductmappings");
+  await rudrakshaProductMappings.createIndex({ rudrakshaType: 1, active: 1 });
+  console.log("✓ RudrakshaProductMapping indexes");
+
+  const calculatorLeads = db.collection("calculatorleads");
+  await calculatorLeads.createIndex({ createdAt: -1 });
+  console.log("✓ CalculatorLead indexes");
+
   console.log("\nAll indexes created successfully.");
   await mongoose.disconnect();
 }
