@@ -6,6 +6,7 @@ import { authLimiter } from "../middleware/rateLimiter";
 import {
   register,
   sendOtp,
+  loginWithEmail,
   verifyOtpAndLogin,
   logout,
   refreshAccessToken,
@@ -44,6 +45,11 @@ const verifyOtpSchema = z.object({
   password: z.string().min(1, "Password is required"),
 });
 
+const emailLoginSchema = z.object({
+  email: z.string().email("Enter a valid email"),
+  password: z.string().min(1, "Password is required"),
+});
+
 const forgotPasswordSchema = z.object({
   phone: z.string().regex(/^\+?[0-9]{10,15}$/, "Enter a valid phone number"),
 });
@@ -78,6 +84,7 @@ const updateAddressSchema = addressSchema.partial();
 
 router.post("/register",         authLimiter, validate(registerSchema),       register);
 router.post("/send-otp",         authLimiter, validate(sendOtpSchema),        sendOtp);
+router.post("/email-login",      authLimiter, validate(emailLoginSchema),     loginWithEmail);
 router.post("/verify-otp",       authLimiter, validate(verifyOtpSchema),      verifyOtpAndLogin);
 router.post("/refresh-token",                                                   refreshAccessToken);
 router.post("/forgot-password",  authLimiter, validate(forgotPasswordSchema), forgotPassword);

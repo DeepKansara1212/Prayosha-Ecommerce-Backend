@@ -10,6 +10,15 @@ export interface ErrorResponse {
   stack?: string;
 }
 
+interface MongoDuplicateKeyError extends Error {
+  code: number;
+  keyValue?: Record<string, unknown>;
+}
+
+function isDuplicateKeyError(err: unknown): err is MongoDuplicateKeyError {
+  return !!err && typeof err === "object" && (err as { code?: number }).code === 11000;
+}
+
 export const errorHandler = (
   err: Error | ApiError,
   _req: Request,
@@ -24,6 +33,16 @@ export const errorHandler = (
     statusCode = err.statusCode;
     message = err.message;
     errors = err.errors;
+  } else if (isDuplicateKeyError(err)) {
+    // Unique-index collision (slug, SKU, coupon code, etc.) — surface as a
+    // clean 409 instead of an opaque 500 from the raw MongoDB driver error.
+    statusCode = 409;
+    const field = err.keyValue ? Object.keys(err.keyValue)[0] : undefined;
+    const value = field ? err.keyValue?.[field] : undefined;
+    message =
+      field && value !== undefined
+        ? `${field} "${value}" is already in use`
+        : "This value is already in use";
   }
 
   const response: ErrorResponse = {

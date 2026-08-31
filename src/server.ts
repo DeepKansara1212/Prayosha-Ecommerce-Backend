@@ -1,11 +1,24 @@
 import { env } from "./config/env";
 import { connectDB } from "./config/db";
 import app from "./app";
+import { ShippingProvider } from "./models/shippingProvider.model";
+import { REGISTERED_PROVIDERS } from "./services/shipping/ShippingFactory";
 
 const PORT = Number(env.PORT) || 8000;
 
+async function seedShippingProviders(): Promise<void> {
+  for (const meta of REGISTERED_PROVIDERS) {
+    await ShippingProvider.findOneAndUpdate(
+      { slug: meta.slug },
+      { $setOnInsert: { name: meta.name, slug: meta.slug, description: meta.description } },
+      { upsert: true }
+    );
+  }
+}
+
 const startServer = async (): Promise<void> => {
   await connectDB();
+  await seedShippingProviders();
 
   app.listen(PORT, () => {
     console.log(`Prayosha API running on http://localhost:${PORT}`);

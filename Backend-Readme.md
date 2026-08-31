@@ -148,6 +148,10 @@ RAZORPAY_KEY_SECRET=<key_secret>
 EMAIL_USER=<gmail_address>
 EMAIL_PASS=<app_password>
 
+# MSG91 Flow API (required for real OTP delivery in production)
+MSG91_AUTH_KEY=<msg91_authkey>
+MSG91_TEMPLATE_ID=<msg91_flow_template_id>
+
 # Open-Meteo geocoding (optional — has a working default, no key needed)
 OPEN_METEO_GEOCODING_URL=https://geocoding-api.open-meteo.com/v1/search
 ```
@@ -865,7 +869,7 @@ Serialises `ApiError`; includes stack in development.
 
 ### OTP / SMS (`src/utils/sms.ts`)
 
-Development: OTP logged to console. Production: replace stub with Twilio, MSG91, Fast2SMS, etc. (commented examples in file).
+Development: OTP logged to console. Production: OTPs are delivered through the MSG91 Flow API using `MSG91_AUTH_KEY` and `MSG91_TEMPLATE_ID`. The MSG91 template must contain the OTP placeholder `##VAR1##` and be approved/configured in the MSG91 dashboard.
 
 ### Email (`src/utils/email.ts`)
 

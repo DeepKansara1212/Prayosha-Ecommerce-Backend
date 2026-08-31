@@ -4,9 +4,38 @@ import { ApiError } from "../utils/ApiError";
 import { ApiResponse } from "../utils/ApiResponse";
 import { Product, IProduct } from "../models/product.model";
 import { Category } from "../models/category.model";
+import { RashiProductMapping } from "../models/rashiProductMapping.model";
+import { PurposeProductMapping } from "../models/purposeProductMapping.model";
 import { paginate } from "../utils/pagination";
 import { deleteFromCloudinary } from "../middleware/upload";
-import { FilterQuery } from "mongoose";
+import { FilterQuery, Types } from "mongoose";
+
+// Replaces this product's Rashi/Purpose mappings wholesale with the given
+// id lists (order = priority). Only touches whichever list is provided, so
+// omitting a field on update leaves that taxonomy's mappings untouched.
+async function syncTaxonomyMappings(
+  productId: Types.ObjectId | string,
+  rashiIds?: string[],
+  purposeIds?: string[]
+): Promise<void> {
+  if (rashiIds !== undefined) {
+    await RashiProductMapping.deleteMany({ product: productId });
+    if (rashiIds.length > 0) {
+      await RashiProductMapping.insertMany(
+        rashiIds.map((rashi, index) => ({ rashi, product: productId, priority: index, active: true }))
+      );
+    }
+  }
+
+  if (purposeIds !== undefined) {
+    await PurposeProductMapping.deleteMany({ product: productId });
+    if (purposeIds.length > 0) {
+      await PurposeProductMapping.insertMany(
+        purposeIds.map((purpose, index) => ({ purpose, product: productId, priority: index, active: true }))
+      );
+    }
+  }
+}
 
 // ─── GET /api/v1/products ─────────────────────────────────────────────────────
 
@@ -30,10 +59,21 @@ export const getProducts = asyncHandler(
 
     const filter: FilterQuery<IProduct> = { isActive: true };
 
-    // Category filter — accepts slug
+    // Category filter — accepts slug. Storefront nav links to categories that
+    // may not be created yet, so an unknown slug is a legitimate empty result,
+    // not an error.
     if (category) {
       const cat = await Category.findOne({ slug: category, isActive: true });
-      if (!cat) throw new ApiError(404, "Category not found");
+      if (!cat) {
+        res.status(200).json(
+          new ApiResponse(
+            200,
+            { products: [], pagination: paginate(pageNum, limitNum, 0) },
+            "Products fetched"
+          )
+        );
+        return;
+      }
       filter.category = cat._id;
     }
 
@@ -103,6 +143,28 @@ export const getFeaturedProducts = asyncHandler(
     res
       .status(200)
       .json(new ApiResponse(200, { products }, "Featured products fetched"));
+  }
+);
+
+// ─── GET /api/v1/products/category-summary ───────────────────────────────────
+
+export const getCategorySummary = asyncHandler(
+  async (_req: Request, res: Response): Promise<void> => {
+    const summary = await Product.aggregate([
+      { $match: { isActive: true } },
+      { $sort: { isFeatured: -1, createdAt: -1 } },
+      {
+        $group: {
+          _id: "$category",
+          count: { $sum: 1 },
+          image: { $first: { $arrayElemAt: ["$images", 0] } },
+        },
+      },
+    ]);
+
+    res
+      .status(200)
+      .json(new ApiResponse(200, { summary }, "Category summary fetched"));
   }
 );
 
@@ -183,6 +245,8 @@ export const createProduct = asyncHandler(
       metaphysicalProperties,
       isFeatured,
       isActive,
+      rashiIds,
+      purposeIds,
     } = req.body as Record<string, unknown>;
 
     if (!name || !sku || !description || !price || !category) {
@@ -217,6 +281,12 @@ export const createProduct = asyncHandler(
       isFeatured: isFeatured ?? false,
       isActive: isActive ?? true,
     });
+
+    await syncTaxonomyMappings(
+      product._id as Types.ObjectId,
+      rashiIds as string[] | undefined,
+      purposeIds as string[] | undefined
+    );
 
     res
       .status(201)
@@ -263,6 +333,12 @@ export const updateProduct = asyncHandler(
     }
 
     await product.save();
+
+    await syncTaxonomyMappings(
+      product._id as Types.ObjectId,
+      req.body.rashiIds as string[] | undefined,
+      req.body.purposeIds as string[] | undefined
+    );
 
     res
       .status(200)

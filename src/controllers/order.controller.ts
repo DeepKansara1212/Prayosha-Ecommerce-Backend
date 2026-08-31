@@ -149,6 +149,50 @@ async function applyRewardsAndGift(
   return { pointsEarned, newPointsBalance: updatedUser?.rewardPoints ?? 0 };
 }
 
+// ─── Shared: mark a Razorpay order paid + run all post-payment side effects ───
+// Used by both the client-driven /razorpay/verify endpoint and the
+// payment.captured webhook, so a payment confirmed either way is processed
+// exactly once (guarded by the paymentStatus !== "paid" check at each call site).
+
+async function finalizePaidOrder(
+  order: IOrder,
+  razorpayPaymentId: string,
+  note: string
+): Promise<{ pointsEarned: number; newPointsBalance: number }> {
+  order.paymentStatus = "paid";
+  order.status = "confirmed";
+  order.razorpayPaymentId = razorpayPaymentId;
+  order.statusHistory.push({ status: "confirmed", note, timestamp: new Date() });
+  await order.save();
+
+  // Decrement stock
+  for (const item of order.items) {
+    await Product.findByIdAndUpdate(item.product, {
+      $inc: { stock: -item.quantity },
+    });
+  }
+
+  // Increment coupon usage
+  if (order.couponCode) {
+    await Coupon.findOneAndUpdate(
+      { code: order.couponCode },
+      { $inc: { usedCount: 1 } }
+    );
+  }
+
+  // Clear cart
+  await Cart.findOneAndUpdate(
+    { user: order.user },
+    { $set: { items: [], couponApplied: undefined } }
+  );
+
+  // Fire-and-forget — email.ts catches and logs failures internally
+  const user = await User.findById(order.user).select("name email");
+  if (user) void sendOrderConfirmationEmail(order, user);
+
+  return applyRewardsAndGift(order, order.user as Types.ObjectId);
+}
+
 // ─── POST /api/v1/cart/coupon/validate ────────────────────────────────────────
 
 export const validateCoupon = asyncHandler(
@@ -403,45 +447,11 @@ export const verifyRazorpayPayment = asyncHandler(
       throw new ApiError(400, "Payment signature is invalid");
     }
 
-    // Payment verified — update order
-    order.paymentStatus = "paid";
-    order.status = "confirmed";
-    order.razorpayPaymentId = razorpay_payment_id;
-    order.statusHistory.push({
-      status: "confirmed",
-      note: "Payment verified via Razorpay",
-      timestamp: new Date(),
-    });
-    await order.save();
-
-    // Decrement stock
-    for (const item of order.items) {
-      await Product.findByIdAndUpdate(item.product, {
-        $inc: { stock: -item.quantity },
-      });
-    }
-
-    // Increment coupon usage
-    if (order.couponCode) {
-      await Coupon.findOneAndUpdate(
-        { code: order.couponCode },
-        { $inc: { usedCount: 1 } }
-      );
-    }
-
-    // Clear cart
-    await Cart.findOneAndUpdate(
-      { user: order.user },
-      { $set: { items: [], couponApplied: undefined } }
-    );
-
-    // Fire-and-forget — email.ts catches and logs failures internally
-    const user = await User.findById(order.user).select("name email");
-    if (user) void sendOrderConfirmationEmail(order, user);
-
-    const { pointsEarned, newPointsBalance } = await applyRewardsAndGift(
+    // Payment verified — update order and run post-payment side effects
+    const { pointsEarned, newPointsBalance } = await finalizePaidOrder(
       order,
-      order.user as Types.ObjectId
+      razorpay_payment_id,
+      "Payment verified via Razorpay"
     );
 
     res.status(200).json(
@@ -451,6 +461,61 @@ export const verifyRazorpayPayment = asyncHandler(
         "Payment verified successfully"
       )
     );
+  }
+);
+
+// ─── POST /api/v1/webhooks/razorpay ───────────────────────────────────────────
+// Reconciles orders whose payment succeeds on Razorpay's side but never reach
+// /razorpay/verify (browser closed mid-checkout, network drop, etc). Always
+// acks with 200 once the signature check has run — including on bad
+// signatures or unhandled event types — so Razorpay doesn't retry-storm us;
+// the ack is not proof of processing, just proof of receipt.
+
+export const handleRazorpayWebhook = asyncHandler(
+  async (req: Request, res: Response): Promise<void> => {
+    if (!env.RAZORPAY_WEBHOOK_SECRET) {
+      console.warn("[Razorpay Webhook] RAZORPAY_WEBHOOK_SECRET not configured — ignoring webhook");
+      res.status(200).json({ success: true });
+      return;
+    }
+
+    const signature = req.header("x-razorpay-signature");
+    const rawBody = req.rawBody ?? Buffer.from(JSON.stringify(req.body));
+
+    const expectedSignature = crypto
+      .createHmac("sha256", env.RAZORPAY_WEBHOOK_SECRET)
+      .update(rawBody)
+      .digest("hex");
+
+    if (!signature || signature !== expectedSignature) {
+      console.warn("[Razorpay Webhook] Invalid signature");
+      res.status(200).json({ success: true });
+      return;
+    }
+
+    const event = req.body?.event as string | undefined;
+
+    if (event === "payment.captured") {
+      const payment = req.body?.payload?.payment?.entity as
+        | { id?: string; order_id?: string }
+        | undefined;
+
+      if (payment?.order_id && payment?.id) {
+        const order = await Order.findOne({ razorpayOrderId: payment.order_id });
+
+        // Skip if already paid — either the client already verified it, or
+        // an earlier delivery of this same webhook already processed it.
+        if (order && order.paymentStatus !== "paid") {
+          await finalizePaidOrder(
+            order,
+            payment.id,
+            "Payment confirmed via Razorpay webhook (payment.captured)"
+          );
+        }
+      }
+    }
+
+    res.status(200).json({ success: true });
   }
 );
 
@@ -483,14 +548,7 @@ export const getUserOrders = asyncHandler(
 
 function toCustomerOrderResponse(order: IOrder) {
   const obj = order.toObject();
-  const {
-    shiprocketOrderId: _srOrderId,
-    shiprocketShipmentId: _srShipmentId,
-    labelUrl: _labelUrl,
-    aftershipTrackingId: _aftershipId,
-    shiprocketStatus: _srStatus,
-    ...safe
-  } = obj;
+  const { shipmentId: _shipmentId, shippingMeta: _shippingMeta, ...safe } = obj;
   return safe;
 }
 

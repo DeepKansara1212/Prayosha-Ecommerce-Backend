@@ -2,6 +2,7 @@ import { Router } from "express";
 import {
   getProducts,
   getFeaturedProducts,
+  getCategorySummary,
   getProductBySlug,
   getRelatedProducts,
   createProduct,
@@ -23,6 +24,7 @@ const router = Router();
 
 router.get("/", getProducts);
 router.get("/featured", getFeaturedProducts);
+router.get("/category-summary", getCategorySummary);
 router.get("/:slug", getProductBySlug);
 router.get("/:slug/related", getRelatedProducts);
 

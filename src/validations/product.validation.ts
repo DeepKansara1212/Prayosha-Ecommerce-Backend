@@ -7,6 +7,8 @@ const shippingSchema = z.object({
   height: z.number().min(0).optional(),
 });
 
+const objectId = z.string().regex(/^[0-9a-fA-F]{24}$/, "Invalid id");
+
 export const createProductSchema = z.object({
   name: z.string().min(1, "Name is required").max(200),
   sku: z.string().min(1, "SKU is required").max(50).toUpperCase(),
@@ -28,6 +30,8 @@ export const createProductSchema = z.object({
   isFeatured: z.boolean().default(false),
   isActive: z.boolean().default(true),
   hasFreeGift: z.boolean().optional(),
+  rashiIds: z.array(objectId).optional(),
+  purposeIds: z.array(objectId).optional(),
 });
 
 export const updateProductSchema = createProductSchema.partial();

@@ -1,25 +1,48 @@
+import axios from "axios";
 import { env } from "../config/env";
 import { ApiError } from "./ApiError";
 
-export const sendSms = async (to: string, message: string): Promise<void> => {
-  if (env.NODE_ENV !== "production") {
+export const sendOtpSms = async (
+  to: string,
+  otp: string
+): Promise<void> => {
+  const hasMsg91Config = Boolean(env.MSG91_AUTH_KEY && env.MSG91_TEMPLATE_ID);
+
+  if (env.NODE_ENV !== "production" && !hasMsg91Config) {
     // OTP is printed to console in dev — copy it from the server terminal
-    console.log(`\n[SMS DEV] To: ${to}\n[SMS DEV] ${message}\n`);
+    console.log(`\n[SMS DEV] To: ${to}\n[SMS DEV] OTP: ${otp}\n`);
     return;
   }
 
-  // ── Production: wire in your SMS provider below ──────────────────────────
-  //
-  // Twilio:
-  //   import twilio from "twilio";
-  //   const client = twilio(env.TWILIO_ACCOUNT_SID, env.TWILIO_AUTH_TOKEN);
-  //   await client.messages.create({ to, from: env.TWILIO_PHONE_NUMBER, body: message });
-  //
-  // MSG91 (popular in India):
-  //   await fetch(`https://api.msg91.com/api/v5/flow/`, { method: "POST", ... });
-  //
-  // Fast2SMS:
-  //   await fetch(`https://www.fast2sms.com/dev/bulkV2?...`);
-  //
-  throw new ApiError(500, "SMS provider not configured for production");
+  if (!hasMsg91Config || !env.MSG91_AUTH_KEY || !env.MSG91_TEMPLATE_ID) {
+    throw new ApiError(500, "MSG91 SMS provider is not configured");
+  }
+
+  const mobile = to.startsWith("+") ? to.slice(1) : to;
+
+  try {
+    const response = await axios.post<{ type?: string }>(
+      "https://control.msg91.com/api/v5/flow",
+      {
+        template_id: env.MSG91_TEMPLATE_ID,
+        short_url: "0",
+        recipients: [{ mobiles: mobile, VAR1: otp }],
+      },
+      {
+        headers: {
+          authkey: env.MSG91_AUTH_KEY,
+          accept: "application/json",
+          "content-type": "application/json",
+        },
+        timeout: 10_000,
+      }
+    );
+
+    if (response.data.type && response.data.type !== "success") {
+      throw new Error(`MSG91 rejected the OTP request: ${response.data.type}`);
+    }
+  } catch (error) {
+    console.error("MSG91 OTP delivery failed", error);
+    throw new ApiError(502, "Unable to send OTP right now. Please try again.");
+  }
 };

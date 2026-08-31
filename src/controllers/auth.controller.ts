@@ -6,7 +6,7 @@ import { User } from "../models/user.model";
 import { ApiResponse } from "../utils/ApiResponse";
 import { ApiError } from "../utils/ApiError";
 import { asyncHandler } from "../utils/asyncHandler";
-import { sendSms } from "../utils/sms";
+import { sendOtpSms } from "../utils/sms";
 import { env } from "../config/env";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -57,7 +57,7 @@ export const register = asyncHandler(async (req: Request, res: Response) => {
 // ─── sendOtp ──────────────────────────────────────────────────────────────────
 
 export const sendOtp = asyncHandler(async (req: Request, res: Response) => {
-  const { phone, purpose, adminOnly = false } = req.body as {
+  const { phone, adminOnly = false } = req.body as {
     phone: string;
     purpose: "login" | "register";
     adminOnly?: boolean;
@@ -78,16 +78,50 @@ export const sendOtp = asyncHandler(async (req: Request, res: Response) => {
     user.otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
     await user.save({ validateBeforeSave: false });
 
-    await sendSms(
-      phone,
-      `Your Prayosha ${purpose === "register" ? "verification" : "login"} OTP is: ${otp}. Valid for 10 minutes. Do not share it.`
-    );
+    await sendOtpSms(phone, otp);
   }
 
   res
     .status(200)
     .json(new ApiResponse(200, {}, "OTP sent successfully"));
 });
+
+// ─── loginWithEmail ──────────────────────────────────────────────────────────
+
+export const loginWithEmail = asyncHandler(
+  async (req: Request, res: Response) => {
+    const { email, password } = req.body as {
+      email: string;
+      password: string;
+    };
+
+    const user = await User.findOne({ email }).select("+password");
+    if (!user || user.role !== "admin") {
+      throw new ApiError(401, "Invalid email or password");
+    }
+
+    const isPasswordValid = await user.isPasswordCorrect(password);
+    if (!isPasswordValid) throw new ApiError(401, "Invalid email or password");
+
+    const accessToken = user.generateAccessToken();
+    const refreshToken = user.generateRefreshToken();
+    user.refreshToken = refreshToken;
+    await user.save({ validateBeforeSave: false });
+
+    const safeUser = await User.findById(user._id);
+
+    res
+      .status(200)
+      .cookie("refreshToken", refreshToken, REFRESH_COOKIE)
+      .json(
+        new ApiResponse(
+          200,
+          { user: safeUser, accessToken },
+          "Logged in successfully"
+        )
+      );
+  }
+);
 
 // ─── verifyOtpAndLogin ────────────────────────────────────────────────────────
 
@@ -211,10 +245,7 @@ export const forgotPassword = asyncHandler(
       user.otpExpiry = new Date(Date.now() + 10 * 60 * 1000);
       await user.save({ validateBeforeSave: false });
 
-      await sendSms(
-        phone,
-        `Your Prayosha password reset OTP is: ${otp}. Valid for 10 minutes. Do not share it.`
-      );
+      await sendOtpSms(phone, otp);
     }
 
     res

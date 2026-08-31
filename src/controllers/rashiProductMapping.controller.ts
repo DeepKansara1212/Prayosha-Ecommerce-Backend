@@ -8,8 +8,10 @@ import { RashiProductMapping } from "../models/rashiProductMapping.model";
 
 export const getRashiProductMappings = asyncHandler(
   async (req: Request, res: Response): Promise<void> => {
-    const { rashi } = req.query;
-    const filter = rashi ? { rashi } : {};
+    const { rashi, product } = req.query;
+    const filter: Record<string, unknown> = {};
+    if (rashi) filter.rashi = rashi;
+    if (product) filter.product = product;
 
     const mappings = await RashiProductMapping.find(filter)
       .sort({ priority: 1 })

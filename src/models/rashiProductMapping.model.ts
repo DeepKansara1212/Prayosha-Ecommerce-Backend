@@ -20,6 +20,7 @@ const rashiProductMappingSchema = new Schema<IRashiProductMapping>(
 );
 
 rashiProductMappingSchema.index({ rashi: 1, active: 1 });
+rashiProductMappingSchema.index({ product: 1 });
 
 export const RashiProductMapping = model<IRashiProductMapping>(
   "RashiProductMapping",
