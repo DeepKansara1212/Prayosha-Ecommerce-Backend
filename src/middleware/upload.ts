@@ -29,6 +29,16 @@ const storage = new CloudinaryStorage({
   } as any,
 });
 
+const videoStorage = new CloudinaryStorage({
+  cloudinary,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  params: {
+    folder: "prayosha-products/videos",
+    resource_type: "video",
+    allowed_formats: ["mp4", "webm", "mov", "m4v"],
+  } as any,
+});
+
 // ─── File filter ──────────────────────────────────────────────────────────────
 
 const fileFilter: multer.Options["fileFilter"] = (_req, file, cb) => {
@@ -40,6 +50,15 @@ const fileFilter: multer.Options["fileFilter"] = (_req, file, cb) => {
   }
 };
 
+const videoFileFilter: multer.Options["fileFilter"] = (_req, file, cb) => {
+  const allowed = ["video/mp4", "video/webm", "video/quicktime", "video/x-m4v"];
+  if (allowed.includes(file.mimetype)) {
+    cb(null, true);
+  } else {
+    cb(new ApiError(400, "Only MP4, WebM, and MOV videos are allowed"));
+  }
+};
+
 // ─── Multer instance ──────────────────────────────────────────────────────────
 
 export const upload = multer({
@@ -48,6 +67,12 @@ export const upload = multer({
   limits: {
     fileSize: 5 * 1024 * 1024, // 5 MB per file
   },
+});
+
+export const uploadVideo = multer({
+  storage: videoStorage,
+  fileFilter: videoFileFilter,
+  limits: { fileSize: 100 * 1024 * 1024 },
 });
 
 // ─── Manual upload from buffer ────────────────────────────────────────────────
@@ -96,9 +121,10 @@ export const uploadToCloudinary = (
 // ─── Delete by public_id ──────────────────────────────────────────────────────
 
 export const deleteFromCloudinary = async (
-  publicId: string
+  publicId: string,
+  resourceType: "image" | "video" = "image"
 ): Promise<{ result: string }> => {
-  const response = await cloudinary.uploader.destroy(publicId);
+  const response = await cloudinary.uploader.destroy(publicId, { resource_type: resourceType });
   if (response.result !== "ok" && response.result !== "not found") {
     throw new ApiError(500, `Cloudinary delete failed: ${response.result}`);
   }

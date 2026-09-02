@@ -17,6 +17,7 @@ export const createProductSchema = z.object({
   price: z.number({ required_error: "Price is required" }).min(0),
   comparePrice: z.number().min(0).optional(),
   costPrice: z.number().min(0).optional(),
+  video: z.string().url().optional(),
   category: z.string().min(1, "Category is required"),
   tags: z.array(z.string()).default([]),
   chakra: z.string().optional(),

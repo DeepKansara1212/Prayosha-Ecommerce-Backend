@@ -10,9 +10,11 @@ import {
   deleteProduct,
   uploadProductImages,
   deleteProductImage,
+  uploadProductVideo,
+  deleteProductVideo,
 } from "../controllers/product.controller";
 import { verifyJWT, verifyAdmin } from "../middleware/auth";
-import { upload } from "../middleware/upload";
+import { upload, uploadVideo } from "../middleware/upload";
 import { validate } from "../middleware/validate";
 import { uploadLimiter } from "../middleware/rateLimiter";
 import { createProductSchema, updateProductSchema } from "../validations/product.validation";
@@ -41,5 +43,7 @@ router.patch("/:id", validate(updateProductSchema), updateProduct);
 router.delete("/:id", deleteProduct);
 router.post("/:id/images", uploadLimiter, upload.array("images", 6), uploadProductImages);
 router.delete("/:id/images", deleteProductImage);
+router.post("/:id/video", uploadLimiter, uploadVideo.single("video"), uploadProductVideo);
+router.delete("/:id/video", deleteProductVideo);
 
 export default router;

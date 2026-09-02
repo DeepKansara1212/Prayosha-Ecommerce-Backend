@@ -22,6 +22,7 @@ export interface IProduct extends Document {
   comparePrice?: number;
   costPrice?: number;
   images: string[];
+  video?: string;
   category: Types.ObjectId;
   tags: string[];
   chakra?: string;
@@ -51,6 +52,7 @@ const productSchema = new Schema<IProduct>(
     comparePrice: { type: Number },
     costPrice: { type: Number, select: false },
     images: { type: [String], validate: [(v: string[]) => v.length <= 6, "Max 6 images allowed"] },
+    video: { type: String, trim: true },
     category: { type: Schema.Types.ObjectId, ref: "Category", required: true },
     tags: { type: [String], default: [] },
     chakra: { type: String },

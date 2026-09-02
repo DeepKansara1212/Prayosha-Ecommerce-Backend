@@ -233,6 +233,7 @@ export const createProduct = asyncHandler(
       price,
       comparePrice,
       costPrice,
+      video,
       category,
       tags,
       chakra,
@@ -268,6 +269,7 @@ export const createProduct = asyncHandler(
       price,
       comparePrice,
       costPrice,
+      video,
       category,
       tags: tags ?? [],
       chakra,
@@ -310,6 +312,7 @@ export const updateProduct = asyncHandler(
       "price",
       "comparePrice",
       "costPrice",
+      "video",
       "category",
       "tags",
       "chakra",
@@ -436,5 +439,44 @@ export const deleteProductImage = asyncHandler(
     res
       .status(200)
       .json(new ApiResponse(200, { images: product.images }, "Image deleted"));
+  }
+);
+
+// ─── POST /api/v1/admin/products/:id/video ───────────────────────────────────
+
+export const uploadProductVideo = asyncHandler(
+  async (req: Request, res: Response): Promise<void> => {
+    const product = await Product.findById(req.params.id);
+    if (!product) throw new ApiError(404, "Product not found");
+
+    const file = req.file as (Express.Multer.File & { path: string }) | undefined;
+    if (!file?.path) throw new ApiError(400, "No video provided");
+
+    if (product.video) {
+      const match = product.video.match(/\/upload\/(?:v\d+\/)?(.+)\.[^.]+$/);
+      if (match?.[1]) await deleteFromCloudinary(match[1], "video");
+    }
+
+    product.video = file.path;
+    await product.save();
+    res.status(200).json(new ApiResponse(200, { video: product.video }, "Video updated"));
+  }
+);
+
+// ─── DELETE /api/v1/admin/products/:id/video ─────────────────────────────────
+
+export const deleteProductVideo = asyncHandler(
+  async (req: Request, res: Response): Promise<void> => {
+    const product = await Product.findById(req.params.id);
+    if (!product) throw new ApiError(404, "Product not found");
+
+    if (product.video) {
+      const match = product.video.match(/\/upload\/(?:v\d+\/)?(.+)\.[^.]+$/);
+      if (match?.[1]) await deleteFromCloudinary(match[1], "video");
+      product.video = undefined;
+      await product.save();
+    }
+
+    res.status(200).json(new ApiResponse(200, {}, "Video deleted"));
   }
 );
