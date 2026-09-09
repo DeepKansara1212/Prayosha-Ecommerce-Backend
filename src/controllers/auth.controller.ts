@@ -16,14 +16,14 @@ const generateOtp = (): string => crypto.randomInt(100000, 1000000).toString();
 const REFRESH_COOKIE: CookieOptions = {
   httpOnly: true,
   secure: env.NODE_ENV === "production",
-  sameSite: "strict",
+  sameSite: "none",
   maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
 };
 
 const CLEAR_COOKIE: CookieOptions = {
   httpOnly: true,
   secure: env.NODE_ENV === "production",
-  sameSite: "strict",
+  sameSite: "none",
 };
 
 // ─── register ─────────────────────────────────────────────────────────────────
