@@ -140,7 +140,8 @@ export class ShiprocketProvider implements IShippingProvider {
               | undefined
           )?.shipping?.weight
         : product?.shipping?.weight;
-      const itemWeight = resolvedWeight ?? defaultWeight;
+      const numericWeight = Number(resolvedWeight);
+      const itemWeight = Number.isFinite(numericWeight) ? numericWeight : defaultWeight;
       totalWeight += itemWeight * item.quantity;
     }
 

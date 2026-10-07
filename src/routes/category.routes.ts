@@ -30,3 +30,6 @@ export default router;
 export const adminCategoryRouter = Router();
 adminCategoryRouter.use(verifyJWT, verifyAdmin);
 adminCategoryRouter.get("/", getAllCategoriesAdmin);
+adminCategoryRouter.post("/", upload.single("image"), createCategory);
+adminCategoryRouter.patch("/:id", upload.single("image"), updateCategory);
+adminCategoryRouter.delete("/:id", deleteCategory);

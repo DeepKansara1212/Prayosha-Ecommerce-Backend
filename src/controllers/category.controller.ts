@@ -8,17 +8,16 @@ import { Product } from "../models/product.model";
 // Multipart form fields arrive as strings — parse a shipping sub-object out of the
 // flat shippingWeight/shippingLength/shippingBreadth/shippingHeight body fields.
 function parseShippingFields(body: Record<string, unknown>): Partial<ICategoryShipping> {
-  const toNumber = (v: unknown): number | undefined => {
+  const toString = (v: unknown): string | undefined => {
     if (v === undefined || v === null || v === "") return undefined;
-    const n = Number(v);
-    return Number.isFinite(n) ? n : undefined;
+    return String(v).trim() || undefined;
   };
 
   const shipping: Partial<ICategoryShipping> = {};
-  const weight = toNumber(body.shippingWeight);
-  const length = toNumber(body.shippingLength);
-  const breadth = toNumber(body.shippingBreadth);
-  const height = toNumber(body.shippingHeight);
+  const weight = toString(body.shippingWeight);
+  const length = toString(body.shippingLength);
+  const breadth = toString(body.shippingBreadth);
+  const height = toString(body.shippingHeight);
 
   if (weight !== undefined) shipping.weight = weight;
   if (length !== undefined) shipping.length = length;
@@ -67,13 +66,8 @@ export const createCategory = asyncHandler(
     if (!name) throw new ApiError(400, "Category name is required");
 
     const shipping = parseShippingFields(req.body as Record<string, unknown>);
-    if (shipping.weight === undefined || shipping.weight <= 0) {
-      throw new ApiError(400, "Shipping weight is required and must be greater than 0");
-    }
-    for (const [field, value] of Object.entries(shipping)) {
-      if (field !== "weight" && value !== undefined && value <= 0) {
-        throw new ApiError(400, `Shipping ${field} must be greater than 0`);
-      }
+    if (shipping.weight === undefined) {
+      throw new ApiError(400, "Shipping weight is required");
     }
 
     const imageUrl = (req.file as Express.Multer.File & { path: string })?.path;
@@ -103,6 +97,10 @@ export const updateCategory = asyncHandler(
     const category = await Category.findById(id);
     if (!category) throw new ApiError(404, "Category not found");
 
+    if (!category.shipping || typeof category.shipping !== "object") {
+      category.shipping = { weight: "" } as typeof category.shipping;
+    }
+
     const { name, slug, description, isActive, sortOrder } = req.body as {
       name?: string;
       slug?: string;
@@ -121,14 +119,6 @@ export const updateCategory = asyncHandler(
     if (imageUrl) category.image = imageUrl;
 
     const shipping = parseShippingFields(req.body as Record<string, unknown>);
-    if (shipping.weight !== undefined && shipping.weight <= 0) {
-      throw new ApiError(400, "Shipping weight must be greater than 0");
-    }
-    for (const [field, value] of Object.entries(shipping)) {
-      if (field !== "weight" && value !== undefined && value <= 0) {
-        throw new ApiError(400, `Shipping ${field} must be greater than 0`);
-      }
-    }
     if (shipping.weight !== undefined) category.shipping.weight = shipping.weight;
     if (shipping.length !== undefined) category.shipping.length = shipping.length;
     if (shipping.breadth !== undefined) category.shipping.breadth = shipping.breadth;

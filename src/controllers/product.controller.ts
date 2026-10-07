@@ -4,6 +4,7 @@ import { ApiError } from "../utils/ApiError";
 import { ApiResponse } from "../utils/ApiResponse";
 import { Product, IProduct } from "../models/product.model";
 import { Category } from "../models/category.model";
+import { SubCategory } from "../models/subCategory.model";
 import { RashiProductMapping } from "../models/rashiProductMapping.model";
 import { PurposeProductMapping } from "../models/purposeProductMapping.model";
 import { paginate } from "../utils/pagination";
@@ -49,6 +50,8 @@ export const getProducts = asyncHandler(
       maxPrice,
       badge,
       chakra,
+      purpose,
+      subCategory,
       inStock,
       page = "1",
       limit = "12",
@@ -94,6 +97,36 @@ export const getProducts = asyncHandler(
 
     // Chakra
     if (chakra) filter.chakra = { $regex: new RegExp(`^${chakra}$`, "i") };
+
+    // Purpose filter — matches products manually tagged with the purpose id.
+    if (purpose) {
+      if (!Types.ObjectId.isValid(purpose)) {
+        res.status(200).json(
+          new ApiResponse(
+            200,
+            { products: [], pagination: paginate(pageNum, limitNum, 0) },
+            "Products fetched"
+          )
+        );
+        return;
+      }
+      filter.purposeTags = new Types.ObjectId(purpose);
+    }
+
+    // Sub-category filter — accepts a SubCategory id.
+    if (subCategory) {
+      if (!Types.ObjectId.isValid(subCategory)) {
+        res.status(200).json(
+          new ApiResponse(
+            200,
+            { products: [], pagination: paginate(pageNum, limitNum, 0) },
+            "Products fetched"
+          )
+        );
+        return;
+      }
+      filter.subCategory = new Types.ObjectId(subCategory);
+    }
 
     // In-stock only
     if (inStock === "true") filter.stock = { $gt: 0 };
@@ -235,14 +268,22 @@ export const createProduct = asyncHandler(
       costPrice,
       video,
       category,
+      subCategory,
       tags,
       chakra,
+      shape,
+      color,
+      purposeTags,
+      rudrakshaFaces,
       badge,
+      beadSize,
+      noOfSticks,
       stock,
       lowStockThreshold,
       useCategoryShipping,
       shipping,
       careInstructions,
+      howToUse,
       metaphysicalProperties,
       isFeatured,
       isActive,
@@ -260,6 +301,14 @@ export const createProduct = asyncHandler(
     const cat = await Category.findById(category);
     if (!cat) throw new ApiError(404, "Category not found");
 
+    if (subCategory !== undefined && subCategory !== null) {
+      if (typeof subCategory !== "string" || !Types.ObjectId.isValid(subCategory)) {
+        throw new ApiError(400, "Invalid subcategory");
+      }
+      const childCategory = await SubCategory.findOne({ _id: subCategory, parentCategory: category });
+      if (!childCategory) throw new ApiError(400, "Subcategory does not belong to the selected category");
+    }
+
     const product = await Product.create({
       name,
       slug,
@@ -271,14 +320,22 @@ export const createProduct = asyncHandler(
       costPrice,
       video,
       category,
+      subCategory: subCategory ?? undefined,
       tags: tags ?? [],
       chakra,
+      shape,
+      color,
+      purposeTags: purposeTags ?? [],
+      rudrakshaFaces,
+      beadSize,
+      noOfSticks,
       badge,
       stock: stock ?? 0,
       lowStockThreshold: lowStockThreshold ?? 5,
       useCategoryShipping: useCategoryShipping ?? true,
       shipping,
       careInstructions,
+      howToUse,
       metaphysicalProperties,
       isFeatured: isFeatured ?? false,
       isActive: isActive ?? true,
@@ -303,6 +360,18 @@ export const updateProduct = asyncHandler(
     const product = await Product.findById(req.params.id);
     if (!product) throw new ApiError(404, "Product not found");
 
+    if (req.body.subCategory !== undefined && req.body.subCategory !== null) {
+      if (typeof req.body.subCategory !== "string" || !Types.ObjectId.isValid(req.body.subCategory)) {
+        throw new ApiError(400, "Invalid subcategory");
+      }
+      const category = req.body.category ?? product.category;
+      const childCategory = await SubCategory.findOne({
+        _id: req.body.subCategory,
+        parentCategory: category,
+      });
+      if (!childCategory) throw new ApiError(400, "Subcategory does not belong to the selected category");
+    }
+
     const allowed: (keyof IProduct)[] = [
       "name",
       "slug",
@@ -314,14 +383,22 @@ export const updateProduct = asyncHandler(
       "costPrice",
       "video",
       "category",
+      "subCategory",
       "tags",
       "chakra",
+      "shape",
+      "color",
+      "purposeTags",
+      "rudrakshaFaces",
+      "beadSize",
+      "noOfSticks",
       "badge",
       "stock",
       "lowStockThreshold",
       "useCategoryShipping",
       "shipping",
       "careInstructions",
+      "howToUse",
       "metaphysicalProperties",
       "isFeatured",
       "isActive",
@@ -329,6 +406,10 @@ export const updateProduct = asyncHandler(
     ];
 
     for (const key of allowed) {
+      if (key === "subCategory" && req.body[key] === null) {
+        product.subCategory = undefined;
+        continue;
+      }
       if (req.body[key] !== undefined) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (product as any)[key] = req.body[key];

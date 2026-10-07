@@ -1,10 +1,10 @@
 import { Schema, model, Document, Types } from "mongoose";
 
 export interface IProductShipping {
-  weight?: number;
-  length?: number;
-  breadth?: number;
-  height?: number;
+  weight?: string;
+  length?: string;
+  breadth?: string;
+  height?: string;
 }
 
 interface IRatings {
@@ -24,14 +24,22 @@ export interface IProduct extends Document {
   images: string[];
   video?: string;
   category: Types.ObjectId;
+  subCategory?: Types.ObjectId;
   tags: string[];
   chakra?: string;
+  shape?: string;
+  color?: string;
+  purposeTags?: Types.ObjectId[];
+  rudrakshaFaces?: string;
+  beadSize?: string;
+  noOfSticks?: number;
   badge?: "BESTSELLER" | "NEW" | "LIMITED" | "RARE" | "GIFT SET";
   stock: number;
   lowStockThreshold: number;
   useCategoryShipping: boolean;
   shipping?: IProductShipping;
   careInstructions?: string;
+  howToUse?: string;
   metaphysicalProperties?: string;
   isFeatured: boolean;
   isActive: boolean;
@@ -54,8 +62,15 @@ const productSchema = new Schema<IProduct>(
     images: { type: [String], validate: [(v: string[]) => v.length <= 6, "Max 6 images allowed"] },
     video: { type: String, trim: true },
     category: { type: Schema.Types.ObjectId, ref: "Category", required: true },
+    subCategory: { type: Schema.Types.ObjectId, ref: "SubCategory" },
     tags: { type: [String], default: [] },
     chakra: { type: String },
+    shape: { type: String, trim: true, maxlength: 100 },
+    color: { type: String, trim: true, maxlength: 100 },
+    purposeTags: { type: [Schema.Types.ObjectId], ref: "Purpose", default: [] },
+    rudrakshaFaces: { type: String, trim: true, maxlength: 50 },
+    beadSize: { type: String, trim: true, maxlength: 50 },
+    noOfSticks: { type: Number, min: 1 },
     badge: { type: String, enum: ["BESTSELLER", "NEW", "LIMITED", "RARE", "GIFT SET"] },
     stock: { type: Number, required: true, default: 0, min: 0 },
     lowStockThreshold: { type: Number, default: 5 },
@@ -63,15 +78,16 @@ const productSchema = new Schema<IProduct>(
     shipping: {
       type: new Schema<IProductShipping>(
         {
-          weight: { type: Number, min: 0 },
-          length: { type: Number, min: 0 },
-          breadth: { type: Number, min: 0 },
-          height: { type: Number, min: 0 },
+          weight: { type: String, trim: true },
+          length: { type: String, trim: true },
+          breadth: { type: String, trim: true },
+          height: { type: String, trim: true },
         },
         { _id: false }
       ),
     },
     careInstructions: { type: String },
+    howToUse: { type: String },
     metaphysicalProperties: { type: String },
     isFeatured: { type: Boolean, default: false },
     isActive: { type: Boolean, default: true },
@@ -88,6 +104,7 @@ const productSchema = new Schema<IProduct>(
 
 productSchema.index({ slug: 1 }, { unique: true });
 productSchema.index({ category: 1 });
+productSchema.index({ purposeTags: 1 });
 productSchema.index({ isFeatured: 1, isActive: 1 });
 productSchema.index({ name: "text", description: "text", tags: "text" });
 

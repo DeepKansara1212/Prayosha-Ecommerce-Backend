@@ -42,8 +42,9 @@ const addressSchema = new Schema<IAddress>(
 export interface IUser extends Document {
   name: string;
   email?: string;        // optional — phone is the primary identifier
-  phone: string;         // required, unique
-  password: string;      // select: false
+  phone?: string;        // optional for Google-only accounts, unique when present
+  password?: string;     // select: false; absent on Google-only accounts
+  googleId?: string;
   role: "customer" | "admin";
   avatar?: string;
   isVerified: boolean;
@@ -75,13 +76,13 @@ const userSchema = new Schema<IUser, IUserModel>(
       lowercase: true,
       trim: true,
     },
-    phone: { type: String, required: true, unique: true, trim: true },
+    phone: { type: String, unique: true, sparse: true, trim: true },
     password: {
       type: String,
-      required: true,
       minlength: [6, "Password must be at least 6 characters"],
       select: false,
     },
+    googleId: { type: String, unique: true, sparse: true, trim: true },
     role: { type: String, enum: ["customer", "admin"], default: "customer" },
     avatar: { type: String },
     isVerified: { type: Boolean, default: false },
@@ -98,7 +99,7 @@ const userSchema = new Schema<IUser, IUserModel>(
 // ─── Pre-save: hash password only when modified ───────────────────────────────
 
 userSchema.pre("save", async function (next) {
-  if (!this.isModified("password")) return next();
+  if (!this.password || !this.isModified("password")) return next();
   try {
     this.password = await bcrypt.hash(this.password, 10);
     next();
@@ -113,6 +114,7 @@ userSchema.methods.isPasswordCorrect = async function (
   this: IUser,
   password: string
 ): Promise<boolean> {
+  if (!this.password) return false;
   return bcrypt.compare(password, this.password);
 };
 

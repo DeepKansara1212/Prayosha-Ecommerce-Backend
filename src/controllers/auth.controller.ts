@@ -1,8 +1,9 @@
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import { OAuth2Client } from "google-auth-library";
 import { Request, Response, CookieOptions } from "express";
-import { User } from "../models/user.model";
+import { IUser, User } from "../models/user.model";
 import { ApiResponse } from "../utils/ApiResponse";
 import { ApiError } from "../utils/ApiError";
 import { asyncHandler } from "../utils/asyncHandler";
@@ -13,17 +14,50 @@ import { env } from "../config/env";
 
 const generateOtp = (): string => crypto.randomInt(100000, 1000000).toString();
 
+const googleClient = new OAuth2Client(env.GOOGLE_CLIENT_ID);
+
+const IS_PROD = env.NODE_ENV === "production";
+
+// SameSite=None is only honoured on a Secure cookie. In development the API is
+// served over plain HTTP, so "none" silently caused the browser to drop the
+// cookie entirely — Lax is both accepted and sufficient there.
 const REFRESH_COOKIE: CookieOptions = {
   httpOnly: true,
-  secure: env.NODE_ENV === "production",
-  sameSite: "none",
+  secure: IS_PROD,
+  sameSite: IS_PROD ? "none" : "lax",
   maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
 };
 
 const CLEAR_COOKIE: CookieOptions = {
   httpOnly: true,
-  secure: env.NODE_ENV === "production",
-  sameSite: "none",
+  secure: IS_PROD,
+  sameSite: IS_PROD ? "none" : "lax",
+};
+
+// The refresh token is returned in the body as well as the cookie: refreshAccessToken
+// accepts either, so the session survives browsers that drop cross-site cookies
+// (Safari ITP) or deployments where API and frontend sit on unrelated domains.
+const issueLoginResponse = async (
+  user: IUser,
+  res: Response,
+): Promise<void> => {
+  const accessToken = user.generateAccessToken();
+  const refreshToken = user.generateRefreshToken();
+  user.refreshToken = refreshToken;
+  await user.save({ validateBeforeSave: false });
+
+  const safeUser = await User.findById(user._id);
+
+  res
+    .status(200)
+    .cookie("refreshToken", refreshToken, REFRESH_COOKIE)
+    .json(
+      new ApiResponse(
+        200,
+        { user: safeUser, accessToken, refreshToken },
+        "Logged in successfully",
+      ),
+    );
 };
 
 // ─── register ─────────────────────────────────────────────────────────────────
@@ -67,7 +101,10 @@ export const sendOtp = asyncHandler(async (req: Request, res: Response) => {
 
   if (adminOnly) {
     if (!user || user.role !== "admin") {
-      throw new ApiError(403, "This phone number is not registered as an admin account.");
+      throw new ApiError(
+        403,
+        "This phone number is not registered as an admin account.",
+      );
     }
   }
 
@@ -81,9 +118,7 @@ export const sendOtp = asyncHandler(async (req: Request, res: Response) => {
     await sendOtpSms(phone, otp);
   }
 
-  res
-    .status(200)
-    .json(new ApiResponse(200, {}, "OTP sent successfully"));
+  res.status(200).json(new ApiResponse(200, {}, "OTP sent successfully"));
 });
 
 // ─── loginWithEmail ──────────────────────────────────────────────────────────
@@ -103,31 +138,20 @@ export const loginWithEmail = asyncHandler(
     const isPasswordValid = await user.isPasswordCorrect(password);
     if (!isPasswordValid) throw new ApiError(401, "Invalid email or password");
 
-    const accessToken = user.generateAccessToken();
-    const refreshToken = user.generateRefreshToken();
-    user.refreshToken = refreshToken;
-    await user.save({ validateBeforeSave: false });
-
-    const safeUser = await User.findById(user._id);
-
-    res
-      .status(200)
-      .cookie("refreshToken", refreshToken, REFRESH_COOKIE)
-      .json(
-        new ApiResponse(
-          200,
-          { user: safeUser, accessToken },
-          "Logged in successfully"
-        )
-      );
-  }
+    await issueLoginResponse(user, res);
+  },
 );
 
 // ─── verifyOtpAndLogin ────────────────────────────────────────────────────────
 
 export const verifyOtpAndLogin = asyncHandler(
   async (req: Request, res: Response) => {
-    const { phone, otp, password, adminLogin = false } = req.body as {
+    const {
+      phone,
+      otp,
+      password,
+      adminLogin = false,
+    } = req.body as {
       phone: string;
       otp: string;
       password: string;
@@ -135,7 +159,7 @@ export const verifyOtpAndLogin = asyncHandler(
     };
 
     const user = await User.findOne({ phone }).select(
-      "+password +otp +otpExpiry"
+      "+password +otp +otpExpiry",
     );
     if (!user) throw new ApiError(400, "Invalid credentials");
 
@@ -162,25 +186,73 @@ export const verifyOtpAndLogin = asyncHandler(
     user.otpExpiry = undefined;
     user.isVerified = true;
 
-    const accessToken = user.generateAccessToken();
-    const refreshToken = user.generateRefreshToken();
-    user.refreshToken = refreshToken;
+    await issueLoginResponse(user, res);
+  },
+);
 
-    await user.save({ validateBeforeSave: false });
+// ─── loginWithGoogle ─────────────────────────────────────────────────────────
 
-    const safeUser = await User.findById(user._id);
+export const loginWithGoogle = asyncHandler(
+  async (req: Request, res: Response): Promise<void> => {
+    const { credential } = req.body as { credential: string };
 
-    res
-      .status(200)
-      .cookie("refreshToken", refreshToken, REFRESH_COOKIE)
-      .json(
-        new ApiResponse(
-          200,
-          { user: safeUser, accessToken },
-          "Logged in successfully"
-        )
-      );
-  }
+    if (!env.GOOGLE_CLIENT_ID) {
+      throw new ApiError(503, "Google login is not configured");
+    }
+
+    let payload;
+    try {
+      const ticket = await googleClient.verifyIdToken({
+        idToken: credential,
+        audience: env.GOOGLE_CLIENT_ID,
+      });
+      payload = ticket.getPayload();
+    } catch {
+      throw new ApiError(401, "Invalid Google ID token");
+    }
+
+    if (!payload?.sub || !payload.email || payload.email_verified !== true) {
+      throw new ApiError(401, "Google account email could not be verified");
+    }
+
+    let user: IUser | null = (await User.findOne({
+      googleId: payload.sub,
+    }).select("+password +refreshToken")) as IUser | null;
+
+    if (!user) {
+      user = (await User.findOne({ email: payload.email }).select(
+        "+password +refreshToken",
+      )) as IUser | null;
+
+      if (user) {
+        if (user.googleId && user.googleId !== payload.sub) {
+          throw new ApiError(
+            409,
+            "This email is linked to another Google account",
+          );
+        }
+        user.googleId = payload.sub;
+        user.isVerified = true;
+        if (payload.picture && !user.avatar) user.avatar = payload.picture;
+        await user.save({ validateBeforeSave: false });
+      } else {
+        user = await User.create({
+          name: payload.name?.trim() || payload.email.split("@")[0],
+          email: payload.email,
+          googleId: payload.sub,
+          avatar: payload.picture,
+          isVerified: true,
+          role: "customer",
+        });
+        user = (await User.findById(user._id).select(
+          "+password +refreshToken",
+        )) as IUser | null;
+      }
+    }
+
+    if (!user) throw new ApiError(500, "Unable to create Google account");
+    await issueLoginResponse(user, res);
+  },
 );
 
 // ─── logout ───────────────────────────────────────────────────────────────────
@@ -189,7 +261,7 @@ export const logout = asyncHandler(async (req: Request, res: Response) => {
   await User.findByIdAndUpdate(
     req.user!._id,
     { $unset: { refreshToken: 1 } },
-    { new: true }
+    { new: true },
   );
 
   res
@@ -210,10 +282,9 @@ export const refreshAccessToken = asyncHandler(
 
     let decoded: { _id: string };
     try {
-      decoded = jwt.verify(
-        incomingToken,
-        env.REFRESH_TOKEN_SECRET
-      ) as { _id: string };
+      decoded = jwt.verify(incomingToken, env.REFRESH_TOKEN_SECRET) as {
+        _id: string;
+      };
     } catch {
       throw new ApiError(401, "Invalid or expired refresh token");
     }
@@ -228,7 +299,7 @@ export const refreshAccessToken = asyncHandler(
     res
       .status(200)
       .json(new ApiResponse(200, { accessToken }, "Token refreshed"));
-  }
+  },
 );
 
 // ─── forgotPassword ───────────────────────────────────────────────────────────
@@ -254,10 +325,10 @@ export const forgotPassword = asyncHandler(
         new ApiResponse(
           200,
           {},
-          "If this number is registered, a reset OTP has been sent"
-        )
+          "If this number is registered, a reset OTP has been sent",
+        ),
       );
-  }
+  },
 );
 
 // ─── resetPassword ────────────────────────────────────────────────────────────
@@ -293,7 +364,7 @@ export const resetPassword = asyncHandler(
     res
       .status(200)
       .json(new ApiResponse(200, {}, "Password reset successfully"));
-  }
+  },
 );
 
 // ─── changePassword ───────────────────────────────────────────────────────────
@@ -321,8 +392,10 @@ export const changePassword = asyncHandler(
     user.password = newPassword;
     await user.save();
 
-    res.status(200).json(new ApiResponse(200, {}, "Password changed successfully"));
-  }
+    res
+      .status(200)
+      .json(new ApiResponse(200, {}, "Password changed successfully"));
+  },
 );
 
 // ─── getMe ────────────────────────────────────────────────────────────────────
@@ -348,8 +421,14 @@ export const updateMe = asyncHandler(async (req: Request, res: Response) => {
 
   const user = await User.findByIdAndUpdate(
     req.user!._id,
-    { $set: { ...(name && { name }), ...(phone && { phone }), ...(avatar && { avatar }) } },
-    { new: true, runValidators: true }
+    {
+      $set: {
+        ...(name && { name }),
+        ...(phone && { phone }),
+        ...(avatar && { avatar }),
+      },
+    },
+    { new: true, runValidators: true },
   );
 
   res.status(200).json(new ApiResponse(200, user, "Profile updated"));
@@ -382,9 +461,7 @@ export const addAddress = asyncHandler(async (req: Request, res: Response) => {
   user.addresses.push(addressData);
   await user.save({ validateBeforeSave: false });
 
-  res
-    .status(201)
-    .json(new ApiResponse(201, user.addresses, "Address added"));
+  res.status(201).json(new ApiResponse(201, user.addresses, "Address added"));
 });
 
 // ─── updateAddress ────────────────────────────────────────────────────────────
@@ -418,13 +495,21 @@ export const updateAddress = asyncHandler(
 
     // Apply only the fields that were sent
     const fields = [
-      "label", "fullName", "phone", "line1", "line2",
-      "city", "state", "pincode", "isDefault",
+      "label",
+      "fullName",
+      "phone",
+      "line1",
+      "line2",
+      "city",
+      "state",
+      "pincode",
+      "isDefault",
     ] as const;
 
     for (const field of fields) {
       if (updateData[field] !== undefined) {
-        (address as unknown as Record<string, unknown>)[field] = updateData[field];
+        (address as unknown as Record<string, unknown>)[field] =
+          updateData[field];
       }
     }
 
@@ -433,7 +518,7 @@ export const updateAddress = asyncHandler(
     res
       .status(200)
       .json(new ApiResponse(200, user.addresses, "Address updated"));
-  }
+  },
 );
 
 // ─── deleteAddress ────────────────────────────────────────────────────────────
@@ -454,5 +539,5 @@ export const deleteAddress = asyncHandler(
     res
       .status(200)
       .json(new ApiResponse(200, user.addresses, "Address deleted"));
-  }
+  },
 );

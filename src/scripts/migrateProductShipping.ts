@@ -33,11 +33,11 @@ async function migrateProductShipping(): Promise<void> {
 
   let migrated = 0;
   for await (const product of cursor) {
-    const shipping: Record<string, number> = {};
-    if (typeof product.weight === "number") shipping.weight = product.weight;
-    if (typeof product.dimensions?.l === "number") shipping.length = product.dimensions.l;
-    if (typeof product.dimensions?.w === "number") shipping.breadth = product.dimensions.w;
-    if (typeof product.dimensions?.h === "number") shipping.height = product.dimensions.h;
+    const shipping: Record<string, string> = {};
+    if (typeof product.weight === "number") shipping.weight = String(product.weight);
+    if (typeof product.dimensions?.l === "number") shipping.length = String(product.dimensions.l);
+    if (typeof product.dimensions?.w === "number") shipping.breadth = String(product.dimensions.w);
+    if (typeof product.dimensions?.h === "number") shipping.height = String(product.dimensions.h);
 
     await products.updateOne(
       { _id: product._id },

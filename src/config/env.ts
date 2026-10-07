@@ -35,6 +35,9 @@ const envSchema = z.object({
   FRONTEND_URL: z.string().url().default("http://localhost:5174"),
   ADMIN_URL: z.string().url().default("http://localhost:5173"),
 
+  // Google Identity Services ID token verification
+  GOOGLE_CLIENT_ID: z.string().optional(),
+
   // Razorpay (optional — app degrades gracefully without it)
   RAZORPAY_KEY_ID: z.string().optional(),
   RAZORPAY_KEY_SECRET: z.string().optional(),

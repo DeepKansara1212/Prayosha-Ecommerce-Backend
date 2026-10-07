@@ -8,19 +8,24 @@ import { Blog } from "../models/blog.model";
 
 export const getPublishedBlogs = asyncHandler(
   async (_req: Request, res: Response): Promise<void> => {
-    const blogs = await Blog.find({ isPublished: true }).sort({ createdAt: -1 });
+    const blogs = await Blog.find({ isPublished: true }).sort({
+      createdAt: -1,
+    });
     res.status(200).json(new ApiResponse(200, { blogs }, "Blogs fetched"));
-  }
+  },
 );
 
 // ─── GET /api/v1/blogs/:slug ──────────────────────────────────────────────────
 
 export const getBlogBySlug = asyncHandler(
   async (req: Request, res: Response): Promise<void> => {
-    const blog = await Blog.findOne({ slug: req.params.slug, isPublished: true });
+    const blog = await Blog.findOne({
+      slug: req.params.slug,
+      isPublished: true,
+    });
     if (!blog) throw new ApiError(404, "Blog post not found");
     res.status(200).json(new ApiResponse(200, { blog }, "Blog fetched"));
-  }
+  },
 );
 
 // ─── GET /api/v1/admin/blogs ──────────────────────────────────────────────────
@@ -29,7 +34,28 @@ export const getAllBlogsAdmin = asyncHandler(
   async (_req: Request, res: Response): Promise<void> => {
     const blogs = await Blog.find().sort({ createdAt: -1 });
     res.status(200).json(new ApiResponse(200, { blogs }, "Blogs fetched"));
-  }
+  },
+);
+
+// ─── POST /api/v1/admin/blogs/upload-images ──────────────────────────────────
+// Expects multipart/form-data with one or more files under the "images" field
+// (see blog.routes.ts, which runs uploadBlogImages.array("images", 6) first).
+// multer-storage-cloudinary already uploads each file to Cloudinary and
+// attaches the resulting secure_url to file.path.
+
+export const uploadBlogImages = asyncHandler(
+  async (req: Request, res: Response): Promise<void> => {
+    const files = req.files as Express.Multer.File[] | undefined;
+
+    if (!files || files.length === 0) {
+      throw new ApiError(400, "At least one image is required");
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const images = files.map((file) => (file as any).path as string);
+
+    res.status(200).json(new ApiResponse(200, { images }, "Images uploaded"));
+  },
 );
 
 // ─── POST /api/v1/admin/blogs ─────────────────────────────────────────────────
@@ -42,10 +68,7 @@ export const createBlog = asyncHandler(
       subtitle,
       excerpt,
       category,
-      readTime,
-      date,
-      emoji,
-      gradient,
+      images,
       featured,
       isPublished,
       content,
@@ -55,22 +78,15 @@ export const createBlog = asyncHandler(
       subtitle?: string;
       excerpt: string;
       category: string;
-      readTime: string;
-      date: string;
-      emoji: string;
-      gradient: string;
+      images?: string[];
       featured?: boolean;
       isPublished?: boolean;
-      content?: Array<{ type: string; text?: string; items?: string[] }>;
+      content?: Array<{ title: string; description: string }>;
     };
 
     if (!title) throw new ApiError(400, "Title is required");
     if (!excerpt) throw new ApiError(400, "Excerpt is required");
     if (!category) throw new ApiError(400, "Category is required");
-    if (!readTime) throw new ApiError(400, "Read time is required");
-    if (!date) throw new ApiError(400, "Date is required");
-    if (!emoji) throw new ApiError(400, "Emoji is required");
-    if (!gradient) throw new ApiError(400, "Gradient is required");
 
     const blog = await Blog.create({
       slug,
@@ -78,17 +94,14 @@ export const createBlog = asyncHandler(
       subtitle,
       excerpt,
       category,
-      readTime,
-      date,
-      emoji,
-      gradient,
+      images: images ?? [],
       featured: featured ?? false,
       isPublished: isPublished ?? true,
       content: content ?? [],
     });
 
     res.status(201).json(new ApiResponse(201, { blog }, "Blog created"));
-  }
+  },
 );
 
 // ─── PATCH /api/v1/admin/blogs/:id ───────────────────────────────────────────
@@ -101,9 +114,15 @@ export const updateBlog = asyncHandler(
     if (!blog) throw new ApiError(404, "Blog post not found");
 
     const fields = [
-      "slug", "title", "subtitle", "excerpt", "category",
-      "readTime", "date", "emoji", "gradient", "featured",
-      "isPublished", "content",
+      "slug",
+      "title",
+      "subtitle",
+      "excerpt",
+      "category",
+      "images",
+      "featured",
+      "isPublished",
+      "content",
     ] as const;
 
     for (const field of fields) {
@@ -116,7 +135,7 @@ export const updateBlog = asyncHandler(
     await blog.save();
 
     res.status(200).json(new ApiResponse(200, { blog }, "Blog updated"));
-  }
+  },
 );
 
 // ─── DELETE /api/v1/admin/blogs/:id ──────────────────────────────────────────
@@ -131,5 +150,5 @@ export const deleteBlog = asyncHandler(
     await blog.deleteOne();
 
     res.status(200).json(new ApiResponse(200, {}, "Blog deleted"));
-  }
+  },
 );

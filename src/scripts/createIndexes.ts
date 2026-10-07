@@ -28,7 +28,14 @@ async function createIndexes(): Promise<void> {
 
   // ── User ─────────────────────────────────────────────────────────────────────
   const users = db.collection("users");
+  const userIndexes = await users.listIndexes().toArray();
+  const phoneIndex = userIndexes.find((index) => index.name === "phone_1");
+  if (phoneIndex && phoneIndex.sparse !== true) {
+    await users.dropIndex(phoneIndex.name);
+  }
+  await users.createIndex({ phone: 1 }, { unique: true, sparse: true });
   await users.createIndex({ email: 1 }, { unique: true, sparse: true });
+  await users.createIndex({ googleId: 1 }, { unique: true, sparse: true });
   console.log("✓ User indexes");
 
   // ── Review ───────────────────────────────────────────────────────────────────

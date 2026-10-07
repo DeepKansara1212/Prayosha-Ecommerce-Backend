@@ -1,11 +1,8 @@
 import { Schema, model, Document } from "mongoose";
 
-type BlogSectionType = "paragraph" | "heading" | "subheading" | "quote" | "list";
-
 interface IBlogSection {
-  type: BlogSectionType;
-  text?: string;
-  items?: string[];
+  title: string;
+  description: string;
 }
 
 export interface IBlog extends Document {
@@ -13,11 +10,13 @@ export interface IBlog extends Document {
   title: string;
   subtitle?: string;
   excerpt: string;
-  category: "Crystal Guides" | "Rituals" | "Wellness" | "Gemstone Spotlight" | "Spiritual Practice";
-  readTime: string;
-  date: string;
-  emoji: string;
-  gradient: string;
+  category:
+    | "Crystal Guides"
+    | "Rituals"
+    | "Wellness"
+    | "Gemstone Spotlight"
+    | "Spiritual Practice";
+  images: string[];
   featured: boolean;
   isPublished: boolean;
   content: IBlogSection[];
@@ -27,15 +26,10 @@ export interface IBlog extends Document {
 
 const blogSectionSchema = new Schema<IBlogSection>(
   {
-    type: {
-      type: String,
-      enum: ["paragraph", "heading", "subheading", "quote", "list"],
-      required: true,
-    },
-    text: { type: String },
-    items: { type: [String] },
+    title: { type: String, required: true, trim: true },
+    description: { type: String, required: true },
   },
-  { _id: false }
+  { _id: false },
 );
 
 const blogSchema = new Schema<IBlog>(
@@ -46,18 +40,21 @@ const blogSchema = new Schema<IBlog>(
     excerpt: { type: String, required: true },
     category: {
       type: String,
-      enum: ["Crystal Guides", "Rituals", "Wellness", "Gemstone Spotlight", "Spiritual Practice"],
+      enum: [
+        "Crystal Guides",
+        "Rituals",
+        "Wellness",
+        "Gemstone Spotlight",
+        "Spiritual Practice",
+      ],
       required: true,
     },
-    readTime: { type: String, required: true },
-    date: { type: String, required: true },
-    emoji: { type: String, required: true },
-    gradient: { type: String, required: true },
+    images: { type: [String], default: [] },
     featured: { type: Boolean, default: false },
     isPublished: { type: Boolean, default: true },
     content: { type: [blogSectionSchema], default: [] },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 blogSchema.index({ category: 1, isPublished: 1 });

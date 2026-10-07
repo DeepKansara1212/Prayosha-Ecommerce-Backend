@@ -39,6 +39,18 @@ const videoStorage = new CloudinaryStorage({
   } as any,
 });
 
+const blogStorage = new CloudinaryStorage({
+  cloudinary,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  params: {
+    folder: "prayosha-blogs",
+    allowed_formats: ["jpg", "jpeg", "png", "webp"],
+    transformation: [
+      { width: 1600, height: 1600, crop: "limit", quality: "auto" },
+    ],
+  } as any,
+});
+
 // ─── File filter ──────────────────────────────────────────────────────────────
 
 const fileFilter: multer.Options["fileFilter"] = (_req, file, cb) => {
@@ -59,7 +71,7 @@ const videoFileFilter: multer.Options["fileFilter"] = (_req, file, cb) => {
   }
 };
 
-// ─── Multer instance ──────────────────────────────────────────────────────────
+// ─── Multer instances ─────────────────────────────────────────────────────────
 
 export const upload = multer({
   storage,
@@ -75,6 +87,15 @@ export const uploadVideo = multer({
   limits: { fileSize: 100 * 1024 * 1024 },
 });
 
+// Blog images — allows multiple files per request (see blog.routes.ts: .array("images", 6))
+export const uploadBlogImages = multer({
+  storage: blogStorage,
+  fileFilter,
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5 MB per file
+  },
+});
+
 // ─── Manual upload from buffer ────────────────────────────────────────────────
 
 export interface CloudinaryUploadResult {
@@ -88,7 +109,7 @@ export interface CloudinaryUploadResult {
 
 export const uploadToCloudinary = (
   buffer: Buffer,
-  folder = "prayosha-products"
+  folder = "prayosha-products",
 ): Promise<CloudinaryUploadResult> => {
   return new Promise((resolve, reject) => {
     const stream = cloudinary.uploader.upload_stream(
@@ -112,7 +133,7 @@ export const uploadToCloudinary = (
           format: result.format,
           bytes: result.bytes,
         });
-      }
+      },
     );
     stream.end(buffer);
   });
@@ -122,9 +143,11 @@ export const uploadToCloudinary = (
 
 export const deleteFromCloudinary = async (
   publicId: string,
-  resourceType: "image" | "video" = "image"
+  resourceType: "image" | "video" = "image",
 ): Promise<{ result: string }> => {
-  const response = await cloudinary.uploader.destroy(publicId, { resource_type: resourceType });
+  const response = await cloudinary.uploader.destroy(publicId, {
+    resource_type: resourceType,
+  });
   if (response.result !== "ok" && response.result !== "not found") {
     throw new ApiError(500, `Cloudinary delete failed: ${response.result}`);
   }

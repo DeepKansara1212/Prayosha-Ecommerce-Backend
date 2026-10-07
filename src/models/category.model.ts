@@ -1,10 +1,10 @@
 import { Schema, model, Document } from "mongoose";
 
 export interface ICategoryShipping {
-  weight: number;
-  length?: number;
-  breadth?: number;
-  height?: number;
+  weight: string;
+  length?: string;
+  breadth?: string;
+  height?: string;
 }
 
 export interface ICategory extends Document {
@@ -30,10 +30,10 @@ const categorySchema = new Schema<ICategory>(
     shipping: {
       type: new Schema<ICategoryShipping>(
         {
-          weight: { type: Number, required: true, min: 0 },
-          length: { type: Number, min: 0 },
-          breadth: { type: Number, min: 0 },
-          height: { type: Number, min: 0 },
+          weight: { type: String, required: true, trim: true },
+          length: { type: String, trim: true },
+          breadth: { type: String, trim: true },
+          height: { type: String, trim: true },
         },
         { _id: false }
       ),

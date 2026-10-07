@@ -8,6 +8,7 @@ import {
   sendOtp,
   loginWithEmail,
   verifyOtpAndLogin,
+  loginWithGoogle,
   logout,
   refreshAccessToken,
   forgotPassword,
@@ -86,6 +87,7 @@ router.post("/register",         authLimiter, validate(registerSchema),       re
 router.post("/send-otp",         authLimiter, validate(sendOtpSchema),        sendOtp);
 router.post("/email-login",      authLimiter, validate(emailLoginSchema),     loginWithEmail);
 router.post("/verify-otp",       authLimiter, validate(verifyOtpSchema),      verifyOtpAndLogin);
+router.post("/google",            authLimiter, validate(z.object({ credential: z.string().min(1) })), loginWithGoogle);
 router.post("/refresh-token",                                                   refreshAccessToken);
 router.post("/forgot-password",  authLimiter, validate(forgotPasswordSchema), forgotPassword);
 router.post("/reset-password",   authLimiter, validate(resetPasswordSchema),  resetPassword);

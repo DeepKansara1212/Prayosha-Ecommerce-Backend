@@ -6,8 +6,10 @@ import {
   createBlog,
   updateBlog,
   deleteBlog,
+  uploadBlogImages,
 } from "../controllers/blog.controller";
 import { verifyJWT, verifyAdmin } from "../middleware/auth";
+import { uploadBlogImages as uploadBlogImagesMiddleware } from "../middleware/upload";
 
 // ─── Public ───────────────────────────────────────────────────────────────────
 
@@ -23,6 +25,11 @@ export default router;
 export const adminBlogRouter = Router();
 adminBlogRouter.use(verifyJWT, verifyAdmin);
 adminBlogRouter.get("/", getAllBlogsAdmin);
+adminBlogRouter.post(
+  "/upload-images",
+  uploadBlogImagesMiddleware.array("images", 6),
+  uploadBlogImages,
+);
 adminBlogRouter.post("/", createBlog);
 adminBlogRouter.patch("/:id", updateBlog);
 adminBlogRouter.delete("/:id", deleteBlog);
