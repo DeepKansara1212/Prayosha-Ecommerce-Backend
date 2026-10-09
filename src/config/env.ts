@@ -47,8 +47,15 @@ const envSchema = z.object({
   RAZORPAY_WEBHOOK_SECRET: z.string().optional(),
 
   // Email (optional — order confirmation emails silently skipped without it)
-  EMAIL_USER: z.string().email().optional(),
+  EMAIL_USER: z.preprocess(
+    (value) => value === "" ? undefined : value,
+    z.string().email().optional()
+  ),
   EMAIL_PASS: z.string().optional(),
+  CONTACT_EMAIL: z.preprocess(
+    (value) => value === "" ? undefined : value,
+    z.string().email().optional()
+  ),
 
   // MSG91 Flow API credentials for production OTP delivery
   MSG91_AUTH_KEY: z.string().optional(),

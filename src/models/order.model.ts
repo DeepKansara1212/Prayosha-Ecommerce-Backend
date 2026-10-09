@@ -171,7 +171,6 @@ const orderSchema = new Schema<IOrder>(
 );
 
 orderSchema.index({ user: 1, createdAt: -1 });
-orderSchema.index({ orderNumber: 1 }, { unique: true });
 orderSchema.index({ razorpayOrderId: 1 }, { sparse: true });
 
 export const Order = model<IOrder>("Order", orderSchema);

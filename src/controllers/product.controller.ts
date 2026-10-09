@@ -10,6 +10,31 @@ import { PurposeProductMapping } from "../models/purposeProductMapping.model";
 import { paginate } from "../utils/pagination";
 import { deleteFromCloudinary } from "../middleware/upload";
 import { FilterQuery, Types } from "mongoose";
+import { parseWeightInKilograms } from "../services/shipping/weight";
+
+function validateShippingWeights(value: unknown): void {
+  if (!value || typeof value !== "object") return;
+  const shipping = value as Record<string, unknown>;
+
+  if (
+    shipping.weight != null &&
+    String(shipping.weight).trim() &&
+    parseWeightInKilograms(String(shipping.weight), true) === undefined
+  ) {
+    throw new ApiError(400, "Shipping weight must be a positive weight with a supported unit");
+  }
+
+  if (
+    shipping.totalWeight != null &&
+    String(shipping.totalWeight).trim() &&
+    parseWeightInKilograms(String(shipping.totalWeight)) === undefined
+  ) {
+    throw new ApiError(
+      400,
+      "Total shipping weight must include a supported unit, such as 250 g or 1.2 kg"
+    );
+  }
+}
 
 // Replaces this product's Rashi/Purpose mappings wholesale with the given
 // id lists (order = priority). Only touches whichever list is provided, so
@@ -282,6 +307,8 @@ export const createProduct = asyncHandler(
       lowStockThreshold,
       useCategoryShipping,
       shipping,
+      productDetails,
+      hasFreeGift,
       careInstructions,
       howToUse,
       metaphysicalProperties,
@@ -291,12 +318,21 @@ export const createProduct = asyncHandler(
       purposeIds,
     } = req.body as Record<string, unknown>;
 
-    if (!name || !sku || !description || !price || !category) {
+    if (!name || !sku || !description || !category) {
       throw new ApiError(
         400,
-        "name, sku, description, price, and category are required"
+        "name, sku, description, and category are required"
       );
     }
+
+    const normalizedPrice = price === "" || price === null ? undefined : price;
+    if (
+      normalizedPrice !== undefined &&
+      (!Number.isFinite(Number(normalizedPrice)) || Number(normalizedPrice) < 0)
+    ) {
+      throw new ApiError(400, "Price must be a non-negative number");
+    }
+    validateShippingWeights(shipping);
 
     const cat = await Category.findById(category);
     if (!cat) throw new ApiError(404, "Category not found");
@@ -315,7 +351,7 @@ export const createProduct = asyncHandler(
       sku,
       description,
       shortDescription,
-      price,
+      price: normalizedPrice,
       comparePrice,
       costPrice,
       video,
@@ -334,11 +370,13 @@ export const createProduct = asyncHandler(
       lowStockThreshold: lowStockThreshold ?? 5,
       useCategoryShipping: useCategoryShipping ?? true,
       shipping,
+      productDetails,
       careInstructions,
       howToUse,
       metaphysicalProperties,
       isFeatured: isFeatured ?? false,
       isActive: isActive ?? true,
+      hasFreeGift: hasFreeGift ?? false,
     });
 
     await syncTaxonomyMappings(
@@ -372,6 +410,8 @@ export const updateProduct = asyncHandler(
       if (!childCategory) throw new ApiError(400, "Subcategory does not belong to the selected category");
     }
 
+    validateShippingWeights(req.body.shipping);
+
     const allowed: (keyof IProduct)[] = [
       "name",
       "slug",
@@ -397,6 +437,8 @@ export const updateProduct = asyncHandler(
       "lowStockThreshold",
       "useCategoryShipping",
       "shipping",
+      "productDetails",
+      "hasFreeGift",
       "careInstructions",
       "howToUse",
       "metaphysicalProperties",
@@ -406,13 +448,28 @@ export const updateProduct = asyncHandler(
     ];
 
     for (const key of allowed) {
+      if (key === "price") continue;
       if (key === "subCategory" && req.body[key] === null) {
         product.subCategory = undefined;
         continue;
       }
+
       if (req.body[key] !== undefined) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (product as any)[key] = req.body[key];
+      }
+    }
+
+    if (req.body.price !== undefined) {
+      if (req.body.price === null || req.body.price === "") {
+        product.price = undefined;
+      } else if (
+        !Number.isFinite(Number(req.body.price)) ||
+        Number(req.body.price) < 0
+      ) {
+        throw new ApiError(400, "Price must be a non-negative number");
+      } else {
+        product.price = Number(req.body.price);
       }
     }
 

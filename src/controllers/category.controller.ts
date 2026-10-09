@@ -4,6 +4,7 @@ import { ApiError } from "../utils/ApiError";
 import { ApiResponse } from "../utils/ApiResponse";
 import { Category, ICategoryShipping } from "../models/category.model";
 import { Product } from "../models/product.model";
+import { parseWeightInKilograms } from "../services/shipping/weight";
 
 // Multipart form fields arrive as strings — parse a shipping sub-object out of the
 // flat shippingWeight/shippingLength/shippingBreadth/shippingHeight body fields.
@@ -66,8 +67,14 @@ export const createCategory = asyncHandler(
     if (!name) throw new ApiError(400, "Category name is required");
 
     const shipping = parseShippingFields(req.body as Record<string, unknown>);
-    if (shipping.weight === undefined) {
-      throw new ApiError(400, "Shipping weight is required");
+    if (
+      shipping.weight !== undefined &&
+      parseWeightInKilograms(shipping.weight, true) === undefined
+    ) {
+      throw new ApiError(
+        400,
+        "Shipping weight must be a positive number, optionally followed by g, kg, mg, lb, or oz"
+      );
     }
 
     const imageUrl = (req.file as Express.Multer.File & { path: string })?.path;
@@ -79,7 +86,7 @@ export const createCategory = asyncHandler(
       image: imageUrl,
       isActive: isActive ?? true,
       sortOrder: sortOrder ?? 0,
-      shipping,
+      ...(Object.keys(shipping).length > 0 && { shipping }),
     });
 
     res
@@ -96,10 +103,6 @@ export const updateCategory = asyncHandler(
 
     const category = await Category.findById(id);
     if (!category) throw new ApiError(404, "Category not found");
-
-    if (!category.shipping || typeof category.shipping !== "object") {
-      category.shipping = { weight: "" } as typeof category.shipping;
-    }
 
     const { name, slug, description, isActive, sortOrder } = req.body as {
       name?: string;
@@ -118,11 +121,43 @@ export const updateCategory = asyncHandler(
     if (sortOrder !== undefined) category.sortOrder = sortOrder;
     if (imageUrl) category.image = imageUrl;
 
-    const shipping = parseShippingFields(req.body as Record<string, unknown>);
-    if (shipping.weight !== undefined) category.shipping.weight = shipping.weight;
-    if (shipping.length !== undefined) category.shipping.length = shipping.length;
-    if (shipping.breadth !== undefined) category.shipping.breadth = shipping.breadth;
-    if (shipping.height !== undefined) category.shipping.height = shipping.height;
+    const rawBody = req.body as Record<string, unknown>;
+    const shipping = parseShippingFields(rawBody);
+    if (
+      shipping.weight !== undefined &&
+      parseWeightInKilograms(shipping.weight, true) === undefined
+    ) {
+      throw new ApiError(
+        400,
+        "Shipping weight must be a positive number, optionally followed by g, kg, mg, lb, or oz"
+      );
+    }
+    const shippingFields = [
+      ["shippingWeight", "weight"],
+      ["shippingLength", "length"],
+      ["shippingBreadth", "breadth"],
+      ["shippingHeight", "height"],
+    ] as const;
+    let shippingChanged = false;
+
+    for (const [bodyKey, shippingKey] of shippingFields) {
+      if (rawBody[bodyKey] === undefined) continue;
+      shippingChanged = true;
+      if (shipping[shippingKey] !== undefined) {
+        category.shipping ??= {};
+        category.shipping[shippingKey] = shipping[shippingKey];
+      } else if (category.shipping) {
+        delete category.shipping[shippingKey];
+      }
+    }
+
+    if (
+      shippingChanged &&
+      category.shipping &&
+      Object.keys(category.shipping).length === 0
+    ) {
+      category.shipping = undefined;
+    }
 
     await category.save();
 

@@ -93,6 +93,11 @@ async function buildOrderPayload(userId: Types.ObjectId, addressId: string) {
     if (!product) throw new ApiError(404, `Product ${cartItem.product} not found`);
     if (!product.isActive)
       throw new ApiError(400, `Product "${product.name}" is no longer available`);
+    if (product.price == null)
+      throw new ApiError(
+        400,
+        `"${product.name}" is available by inquiry and cannot be checked out`
+      );
     if (product.stock < cartItem.quantity)
       throw new ApiError(
         400,

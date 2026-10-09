@@ -2,9 +2,19 @@ import { Schema, model, Document, Types } from "mongoose";
 
 export interface IProductShipping {
   weight?: string;
+  totalWeight?: string;
   length?: string;
   breadth?: string;
   height?: string;
+}
+
+export interface IProductDetails {
+  weight?: string;
+  length?: string;
+  breadth?: string;
+  height?: string;
+  dimensions?: string;
+  size?: string;
 }
 
 interface IRatings {
@@ -18,7 +28,7 @@ export interface IProduct extends Document {
   sku: string;
   description: string;
   shortDescription?: string;
-  price: number;
+  price?: number;
   comparePrice?: number;
   costPrice?: number;
   images: string[];
@@ -38,6 +48,7 @@ export interface IProduct extends Document {
   lowStockThreshold: number;
   useCategoryShipping: boolean;
   shipping?: IProductShipping;
+  productDetails?: IProductDetails;
   careInstructions?: string;
   howToUse?: string;
   metaphysicalProperties?: string;
@@ -56,7 +67,7 @@ const productSchema = new Schema<IProduct>(
     sku: { type: String, required: true, unique: true, uppercase: true },
     description: { type: String, required: true },
     shortDescription: { type: String, maxlength: 200 },
-    price: { type: Number, required: true, min: 0 },
+    price: { type: Number, min: 0 },
     comparePrice: { type: Number },
     costPrice: { type: Number, select: false },
     images: { type: [String], validate: [(v: string[]) => v.length <= 6, "Max 6 images allowed"] },
@@ -79,9 +90,23 @@ const productSchema = new Schema<IProduct>(
       type: new Schema<IProductShipping>(
         {
           weight: { type: String, trim: true },
+          totalWeight: { type: String, trim: true },
           length: { type: String, trim: true },
           breadth: { type: String, trim: true },
           height: { type: String, trim: true },
+        },
+        { _id: false }
+      ),
+    },
+    productDetails: {
+      type: new Schema<IProductDetails>(
+        {
+          weight: { type: String, trim: true },
+          length: { type: String, trim: true },
+          breadth: { type: String, trim: true },
+          height: { type: String, trim: true },
+          dimensions: { type: String, trim: true },
+          size: { type: String, trim: true },
         },
         { _id: false }
       ),
@@ -102,7 +127,6 @@ const productSchema = new Schema<IProduct>(
 
 // ─── Indexes ──────────────────────────────────────────────────────────────────
 
-productSchema.index({ slug: 1 }, { unique: true });
 productSchema.index({ category: 1 });
 productSchema.index({ purposeTags: 1 });
 productSchema.index({ isFeatured: 1, isActive: 1 });

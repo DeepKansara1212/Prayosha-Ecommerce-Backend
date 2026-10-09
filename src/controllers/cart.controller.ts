@@ -36,7 +36,8 @@ export const getCart = asyncHandler(
     // Annotate unavailable items and compute totals
     const annotatedItems = cart.items.map((item) => {
       const product = item.product as any;
-      const unavailable = !product?.isActive || product?.stock === 0;
+      const unavailable =
+        !product?.isActive || product?.stock === 0 || product?.price == null;
       return {
         _id: item._id,
         product,
@@ -81,6 +82,8 @@ export const addItem = asyncHandler(
     const product = await resolveProduct(productId);
     if (!product) throw new ApiError(404, "Product not found");
     if (!product.isActive) throw new ApiError(400, "Product is not available");
+    if (product.price == null)
+      throw new ApiError(400, "This product is available by inquiry and cannot be added to the cart");
     if (product.stock === 0) throw new ApiError(400, "Product is out of stock");
 
     let cart = await Cart.findOne({ user: userId });
@@ -121,6 +124,8 @@ export const updateItemQuantity = asyncHandler(
 
     const product = await resolveProduct(productId);
     if (!product) throw new ApiError(404, "Product not found");
+    if (product.price == null)
+      throw new ApiError(400, "This product is available by inquiry and cannot be purchased");
 
     const cart = await Cart.findOne({ user: userId });
     if (!cart) throw new ApiError(404, "Cart not found");
@@ -230,7 +235,8 @@ export const applyCoupon = asyncHandler(
         quantity: item.quantity,
         priceAtAdd: item.priceAtAdd,
         lineTotal: item.priceAtAdd * item.quantity,
-        unavailable: !product?.isActive || product?.stock === 0,
+        unavailable:
+          !product?.isActive || product?.stock === 0 || product?.price == null,
       };
     });
 

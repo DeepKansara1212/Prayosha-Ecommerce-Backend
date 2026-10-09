@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { ApiError } from "../../../utils/ApiError";
 import { IOrder } from "../../../models/order.model";
 import { Product } from "../../../models/product.model";
+import { parseWeightInKilograms } from "../weight";
 import { User } from "../../../models/user.model";
 import {
   IShippingProvider,
@@ -121,36 +122,96 @@ export class ShiprocketProvider implements IShippingProvider {
     return data;
   }
 
-  private async resolveOrderWeight(order: IOrder): Promise<number> {
+  private async resolveOrderPackage(order: IOrder): Promise<{
+    weight: number;
+    length: number;
+    breadth: number;
+    height: number;
+  }> {
     const defaultWeight = this.credentials.defaultWeight ?? 0.5;
+    const defaultLength = this.credentials.defaultLength ?? 10;
+    const defaultBreadth = this.credentials.defaultBreadth ?? 10;
+    const defaultHeight = this.credentials.defaultHeight ?? 10;
     const productIds = order.items.map((item) => item.product);
     const products = await Product.find({ _id: { $in: productIds } })
-      .select("useCategoryShipping shipping category")
-      .populate("category", "shipping");
+      .select("useCategoryShipping shipping category subCategory")
+      .populate("category", "shipping")
+      .populate("subCategory", "shipping");
 
     let totalWeight = 0;
+    const dimensions = {
+      length: [] as number[],
+      breadth: [] as number[],
+      height: [] as number[],
+    };
     for (const item of order.items) {
       const product = products.find(
         (p) => p._id.toString() === item.product.toString()
       );
-      const resolvedWeight = product?.useCategoryShipping
-        ? (
-            product.category as unknown as
-              | { shipping?: { weight?: number } }
-              | undefined
-          )?.shipping?.weight
-        : product?.shipping?.weight;
-      const numericWeight = Number(resolvedWeight);
-      const itemWeight = Number.isFinite(numericWeight) ? numericWeight : defaultWeight;
-      totalWeight += itemWeight * item.quantity;
+      const categoryShipping = (
+        product?.category as unknown as
+          | { shipping?: { weight?: string; length?: string; breadth?: string; height?: string } }
+          | undefined
+      )?.shipping;
+      const subCategoryShipping = (
+        product?.subCategory as unknown as
+          | { shipping?: { weight?: string; length?: string; breadth?: string; height?: string } }
+          | undefined
+      )?.shipping;
+      const inheritedShipping = product?.useCategoryShipping
+        ? {
+            weight: subCategoryShipping?.weight ?? categoryShipping?.weight,
+            length: subCategoryShipping?.length ?? categoryShipping?.length,
+            breadth: subCategoryShipping?.breadth ?? categoryShipping?.breadth,
+            height: subCategoryShipping?.height ?? categoryShipping?.height,
+          }
+        : product?.shipping;
+      const totalShippingWeight = product?.shipping?.totalWeight;
+      const itemWeight = totalShippingWeight
+        ? parseWeightInKilograms(totalShippingWeight)
+        : inheritedShipping?.weight != null
+          ? parseWeightInKilograms(String(inheritedShipping.weight), true)
+          : undefined;
+      if (totalShippingWeight && itemWeight === undefined) {
+        throw new Error(
+          `Invalid total shipping weight for product "${item.name}". Use a value such as 250 g or 1.2 kg.`
+        );
+      }
+      totalWeight += (itemWeight ?? defaultWeight) * item.quantity;
+
+      for (const key of ["length", "breadth", "height"] as const) {
+        const rawDimension = inheritedShipping?.[key];
+        if (rawDimension == null || !String(rawDimension).trim()) {
+          dimensions[key].push(
+            key === "length"
+              ? defaultLength
+              : key === "breadth"
+                ? defaultBreadth
+                : defaultHeight
+          );
+          continue;
+        }
+        const match = String(rawDimension).trim().match(/^(\d+(?:\.\d+)?)\s*(?:cm)?$/i);
+        if (!match || Number(match[1]) <= 0) {
+          throw new Error(
+            `Invalid shipping ${key} for product "${item.name}". Enter a positive measurement in centimeters.`
+          );
+        }
+        dimensions[key].push(Number(match[1]));
+      }
     }
 
-    return Math.max(totalWeight, 0.1);
+    return {
+      weight: Math.max(totalWeight, 0.1),
+      length: dimensions.length.length ? Math.max(...dimensions.length) : defaultLength,
+      breadth: dimensions.breadth.length ? Math.max(...dimensions.breadth) : defaultBreadth,
+      height: dimensions.height.length ? Math.max(...dimensions.height) : defaultHeight,
+    };
   }
 
   async createShipment(order: IOrder): Promise<StandardShipmentResult> {
     const user = await User.findById(order.user).select("email");
-    const weight = await this.resolveOrderWeight(order);
+    const packageDetails = await this.resolveOrderPackage(order);
 
     const payload: Record<string, unknown> = {
       order_id: order.orderNumber,
@@ -187,10 +248,10 @@ export class ShiprocketProvider implements IShippingProvider {
       })),
       payment_method: order.paymentMethod === "cod" ? "COD" : "Prepaid",
       sub_total: order.total,
-      length: this.credentials.defaultLength ?? 10,
-      breadth: this.credentials.defaultBreadth ?? 10,
-      height: this.credentials.defaultHeight ?? 10,
-      weight,
+      length: packageDetails.length,
+      breadth: packageDetails.breadth,
+      height: packageDetails.height,
+      weight: packageDetails.weight,
     };
 
     if (this.credentials.channelId) {

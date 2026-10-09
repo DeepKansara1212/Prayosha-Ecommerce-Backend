@@ -1,9 +1,17 @@
 import { Schema, model, Document, Types } from "mongoose";
 
+export interface ISubCategoryShipping {
+  weight?: string;
+  length?: string;
+  breadth?: string;
+  height?: string;
+}
+
 export interface ISubCategory extends Document {
   name: string;
   slug: string;
   parentCategory: Types.ObjectId;
+  shipping?: ISubCategoryShipping;
   isActive: boolean;
   sortOrder: number;
   createdAt: Date;
@@ -15,6 +23,17 @@ const subCategorySchema = new Schema<ISubCategory>(
     name: { type: String, required: true, trim: true },
     slug: { type: String, required: true, lowercase: true, trim: true },
     parentCategory: { type: Schema.Types.ObjectId, ref: "Category", required: true },
+    shipping: {
+      type: new Schema<ISubCategoryShipping>(
+        {
+          weight: { type: String, trim: true },
+          length: { type: String, trim: true },
+          breadth: { type: String, trim: true },
+          height: { type: String, trim: true },
+        },
+        { _id: false }
+      ),
+    },
     isActive: { type: Boolean, default: true },
     sortOrder: { type: Number, default: 0 },
   },

@@ -6,6 +6,33 @@ import { ApiResponse } from "../utils/ApiResponse";
 import { Category } from "../models/category.model";
 import { Product } from "../models/product.model";
 import { SubCategory } from "../models/subCategory.model";
+import { parseWeightInKilograms } from "../services/shipping/weight";
+
+const SHIPPING_KEYS = ["weight", "length", "breadth", "height"] as const;
+
+function parseShipping(value: unknown): Record<string, string> | undefined {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new ApiError(400, "Shipping details must be an object");
+  }
+
+  const input = value as Record<string, unknown>;
+  const shipping: Record<string, string> = {};
+  for (const key of SHIPPING_KEYS) {
+    const raw = input[key];
+    if (raw === undefined || raw === null || raw === "") continue;
+    const field = String(raw).trim();
+    if (!field) continue;
+    if (key === "weight" && parseWeightInKilograms(field, true) === undefined) {
+      throw new ApiError(
+        400,
+        "Shipping weight must be a positive number, optionally followed by g, kg, mg, lb, or oz"
+      );
+    }
+    shipping[key] = field;
+  }
+  return shipping;
+}
 
 // ─── GET /api/v1/subcategories ────────────────────────────────────────────────
 
@@ -58,11 +85,13 @@ export const createSubCategory = asyncHandler(
 
     const category = await Category.findById(parentCategory).select("_id");
     if (!category) throw new ApiError(404, "Parent category not found");
+    const shipping = parseShipping(req.body.shipping);
 
     const subcategory = await SubCategory.create({
       name,
       slug,
       parentCategory,
+      ...(shipping && Object.keys(shipping).length > 0 && { shipping }),
       isActive: isActive ?? true,
       sortOrder: sortOrder ?? 0,
     });
@@ -90,6 +119,10 @@ export const updateSubCategory = asyncHandler(
     if (slug !== undefined) subcategory.slug = slug;
     if (isActive !== undefined) subcategory.isActive = isActive;
     if (sortOrder !== undefined) subcategory.sortOrder = sortOrder;
+    const shipping = parseShipping(req.body.shipping);
+    if (shipping !== undefined) {
+      subcategory.shipping = Object.keys(shipping).length > 0 ? shipping : undefined;
+    }
 
     if (parentCategory !== undefined) {
       if (!Types.ObjectId.isValid(parentCategory)) {

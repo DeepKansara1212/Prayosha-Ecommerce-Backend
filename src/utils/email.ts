@@ -172,3 +172,37 @@ export async function sendOrderConfirmationEmail(
     console.error("Order confirmation email failed:", err);
   }
 }
+
+export async function sendContactInquiryEmail(message: {
+  name: string;
+  email: string;
+  subject: string;
+  message: string;
+  productUrl?: string;
+}): Promise<void> {
+  if (!env.EMAIL_USER || !env.EMAIL_PASS || !env.CONTACT_EMAIL) {
+    throw new Error("Contact email delivery is not configured");
+  }
+
+  const transporter = nodemailer.createTransport({
+    service: "gmail",
+    auth: { user: env.EMAIL_USER, pass: env.EMAIL_PASS },
+  });
+
+  const text = [
+    `Name: ${message.name}`,
+    `Email: ${message.email}`,
+    `Subject: ${message.subject}`,
+    "",
+    message.message,
+    ...(message.productUrl ? ["", `Product: ${message.productUrl}`] : []),
+  ].join("\n");
+
+  await transporter.sendMail({
+    from: `"Prayosha Crystal" <${env.EMAIL_USER}>`,
+    to: env.CONTACT_EMAIL,
+    replyTo: message.email,
+    subject: `Website inquiry: ${message.subject}`,
+    text,
+  });
+}

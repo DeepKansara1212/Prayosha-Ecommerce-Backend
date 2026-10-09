@@ -147,6 +147,10 @@ RAZORPAY_KEY_SECRET=<key_secret>
 # Email (optional — order confirmation emails skipped without these)
 EMAIL_USER=<gmail_address>
 EMAIL_PASS=<app_password>
+CONTACT_EMAIL=<inbox_for_website_inquiries>
+
+# The Contact form and product inquiry fallback require all three email settings.
+# Until configured, the API returns an unavailable response instead of reporting success.
 
 # MSG91 Flow API (required for real OTP delivery in production)
 MSG91_AUTH_KEY=<msg91_authkey>

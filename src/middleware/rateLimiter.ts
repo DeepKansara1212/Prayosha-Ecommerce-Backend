@@ -30,3 +30,11 @@ export const uploadLimiter = rateLimit({
   legacyHeaders: false,
   handler: handler("Upload limit reached. Please try again after 15 minutes."),
 });
+
+export const contactLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: handler("Too many contact requests. Please try again after 15 minutes."),
+});

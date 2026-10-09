@@ -2,9 +2,19 @@ import { z } from "zod";
 
 const shippingSchema = z.object({
   weight: z.string().optional(),
+  totalWeight: z.string().optional(),
   length: z.string().optional(),
   breadth: z.string().optional(),
   height: z.string().optional(),
+});
+
+const productDetailsSchema = z.object({
+  weight: z.string().optional(),
+  length: z.string().optional(),
+  breadth: z.string().optional(),
+  height: z.string().optional(),
+  dimensions: z.string().optional(),
+  size: z.string().optional(),
 });
 
 const objectId = z.string().regex(/^[0-9a-fA-F]{24}$/, "Invalid id");
@@ -14,7 +24,7 @@ export const createProductSchema = z.object({
   sku: z.string().min(1, "SKU is required").max(50).toUpperCase(),
   description: z.string().min(1, "Description is required"),
   shortDescription: z.string().max(200).optional(),
-  price: z.number({ required_error: "Price is required" }).min(0),
+  price: z.number().min(0).nullable().optional(),
   comparePrice: z.number().min(0).optional(),
   costPrice: z.number().min(0).optional(),
   video: z.string().url().optional(),
@@ -33,6 +43,7 @@ export const createProductSchema = z.object({
   lowStockThreshold: z.number().int().min(0).default(5),
   useCategoryShipping: z.boolean().optional().default(true),
   shipping: shippingSchema.optional(),
+  productDetails: productDetailsSchema.optional(),
   careInstructions: z.string().optional(),
   howToUse: z.string().optional(),
   metaphysicalProperties: z.string().optional(),
