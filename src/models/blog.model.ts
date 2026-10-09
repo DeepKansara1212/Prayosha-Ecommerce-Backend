@@ -1,8 +1,12 @@
 import { Schema, model, Document } from "mongoose";
 
 interface IBlogSection {
-  title: string;
-  description: string;
+  type?: "paragraph" | "heading" | "subheading" | "quote" | "list" | "image";
+  title?: string;
+  description?: string;
+  text?: string;
+  items?: string[];
+  image?: string;
 }
 
 export interface IBlog extends Document {
@@ -26,8 +30,12 @@ export interface IBlog extends Document {
 
 const blogSectionSchema = new Schema<IBlogSection>(
   {
-    title: { type: String, required: true, trim: true },
-    description: { type: String, required: true },
+    type: { type: String },
+    title: { type: String, trim: true },
+    description: { type: String },
+    text: { type: String },
+    items: { type: [String] },
+    image: { type: String },
   },
   { _id: false },
 );

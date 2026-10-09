@@ -11,6 +11,7 @@ export interface ISubCategory extends Document {
   name: string;
   slug: string;
   parentCategory: Types.ObjectId;
+  image?: string;
   shipping?: ISubCategoryShipping;
   isActive: boolean;
   sortOrder: number;
@@ -23,6 +24,7 @@ const subCategorySchema = new Schema<ISubCategory>(
     name: { type: String, required: true, trim: true },
     slug: { type: String, required: true, lowercase: true, trim: true },
     parentCategory: { type: Schema.Types.ObjectId, ref: "Category", required: true },
+    image: { type: String },
     shipping: {
       type: new Schema<ISubCategoryShipping>(
         {

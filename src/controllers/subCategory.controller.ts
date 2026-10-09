@@ -10,18 +10,36 @@ import { parseWeightInKilograms } from "../services/shipping/weight";
 
 const SHIPPING_KEYS = ["weight", "length", "breadth", "height"] as const;
 
-function parseShipping(value: unknown): Record<string, string> | undefined {
-  if (value === undefined) return undefined;
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new ApiError(400, "Shipping details must be an object");
-  }
-
-  const input = value as Record<string, unknown>;
+function parseShippingFields(body: Record<string, unknown>): Record<string, string> | undefined {
   const shipping: Record<string, string> = {};
+
+  const collect = (value: unknown) => {
+    if (value === undefined || value === null || typeof value !== "object" || Array.isArray(value)) {
+      return;
+    }
+
+    const input = value as Record<string, unknown>;
+    for (const key of SHIPPING_KEYS) {
+      const raw = input[key];
+      if (raw === undefined || raw === null || raw === "") continue;
+      const field = String(raw).trim();
+      if (!field) continue;
+      if (key === "weight" && parseWeightInKilograms(field, true) === undefined) {
+        throw new ApiError(
+          400,
+          "Shipping weight must be a positive number, optionally followed by g, kg, mg, lb, or oz"
+        );
+      }
+      shipping[key] = field;
+    }
+  };
+
+  collect(body.shipping);
+
   for (const key of SHIPPING_KEYS) {
-    const raw = input[key];
-    if (raw === undefined || raw === null || raw === "") continue;
-    const field = String(raw).trim();
+    const value = body[`shipping${key.charAt(0).toUpperCase()}${key.slice(1)}`];
+    if (value === undefined || value === null || value === "") continue;
+    const field = String(value).trim();
     if (!field) continue;
     if (key === "weight" && parseWeightInKilograms(field, true) === undefined) {
       throw new ApiError(
@@ -31,7 +49,8 @@ function parseShipping(value: unknown): Record<string, string> | undefined {
     }
     shipping[key] = field;
   }
-  return shipping;
+
+  return Object.keys(shipping).length > 0 ? shipping : undefined;
 }
 
 // ─── GET /api/v1/subcategories ────────────────────────────────────────────────
@@ -85,12 +104,15 @@ export const createSubCategory = asyncHandler(
 
     const category = await Category.findById(parentCategory).select("_id");
     if (!category) throw new ApiError(404, "Parent category not found");
-    const shipping = parseShipping(req.body.shipping);
+
+    const shipping = parseShippingFields(req.body as Record<string, unknown>);
+    const imageUrl = (req.file as Express.Multer.File & { path: string })?.path;
 
     const subcategory = await SubCategory.create({
       name,
       slug,
       parentCategory,
+      image: imageUrl,
       ...(shipping && Object.keys(shipping).length > 0 && { shipping }),
       isActive: isActive ?? true,
       sortOrder: sortOrder ?? 0,
@@ -115,11 +137,38 @@ export const updateSubCategory = asyncHandler(
       sortOrder?: number;
     };
 
+    const imageUrl = (req.file as Express.Multer.File & { path: string })?.path;
+
     if (name !== undefined) subcategory.name = name;
     if (slug !== undefined) subcategory.slug = slug;
     if (isActive !== undefined) subcategory.isActive = isActive;
     if (sortOrder !== undefined) subcategory.sortOrder = sortOrder;
-    const shipping = parseShipping(req.body.shipping);
+    if (imageUrl) subcategory.image = imageUrl;
+
+    const shipping = parseShippingFields(req.body as Record<string, unknown>);
+    const shippingFields = [
+      ["shippingWeight", "weight"],
+      ["shippingLength", "length"],
+      ["shippingBreadth", "breadth"],
+      ["shippingHeight", "height"],
+    ] as const;
+    let shippingChanged = false;
+
+    for (const [bodyKey, shippingKey] of shippingFields) {
+      if ((req.body as Record<string, unknown>)[bodyKey] === undefined) continue;
+      shippingChanged = true;
+      if (shipping && shipping[shippingKey] !== undefined) {
+        subcategory.shipping ??= {};
+        subcategory.shipping[shippingKey] = shipping[shippingKey];
+      } else if (subcategory.shipping) {
+        delete subcategory.shipping[shippingKey];
+      }
+    }
+
+    if (shippingChanged && subcategory.shipping && Object.keys(subcategory.shipping).length === 0) {
+      subcategory.shipping = undefined;
+    }
+
     if (shipping !== undefined) {
       subcategory.shipping = Object.keys(shipping).length > 0 ? shipping : undefined;
     }
