@@ -88,6 +88,33 @@ export const register = asyncHandler(async (req: Request, res: Response) => {
     .json(new ApiResponse(201, user, "Account created successfully"));
 });
 
+export const registerWithEmail = asyncHandler(
+  async (req: Request, res: Response): Promise<void> => {
+    const { name, email, password } = req.body as {
+      name: string;
+      email: string;
+      password: string;
+    };
+
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      throw new ApiError(409, "An account with this email already exists. Please sign in.");
+    }
+
+    const user = await User.create({
+      name: name.trim(),
+      email: email.trim().toLowerCase(),
+      password,
+      isVerified: false,
+      role: "customer",
+      ...(typeof req.body?.phone === "string" && req.body.phone.trim()
+        ? { phone: req.body.phone.trim() }
+        : {}),
+    });
+    await issueLoginResponse(user, res);
+  },
+);
+
 // ─── sendOtp ──────────────────────────────────────────────────────────────────
 
 export const sendOtp = asyncHandler(async (req: Request, res: Response) => {
@@ -129,9 +156,30 @@ export const loginWithEmail = asyncHandler(
       email: string;
       password: string;
     };
+    const normalizedEmail = email.trim().toLowerCase();
 
-    const user = await User.findOne({ email }).select("+password");
+    const user = await User.findOne({ email: normalizedEmail }).select("+password");
     if (!user || user.role !== "admin") {
+      throw new ApiError(401, "Invalid email or password");
+    }
+
+    const isPasswordValid = await user.isPasswordCorrect(password);
+    if (!isPasswordValid) throw new ApiError(401, "Invalid email or password");
+
+    await issueLoginResponse(user, res);
+  },
+);
+
+export const loginWithEmailPassword = asyncHandler(
+  async (req: Request, res: Response): Promise<void> => {
+    const { email, password } = req.body as {
+      email: string;
+      password: string;
+    };
+    const normalizedEmail = email.trim().toLowerCase();
+
+    const user = await User.findOne({ email: normalizedEmail }).select("+password");
+    if (!user || user.role !== "customer") {
       throw new ApiError(401, "Invalid email or password");
     }
 
@@ -233,12 +281,11 @@ export const loginWithGoogle = asyncHandler(
         }
         user.googleId = payload.sub;
         user.isVerified = true;
-        if (payload.picture && !user.avatar) user.avatar = payload.picture;
         await user.save({ validateBeforeSave: false });
       } else {
         user = await User.create({
           name: payload.name?.trim() || payload.email.split("@")[0],
-          email: payload.email,
+          email: payload.email.trim().toLowerCase(),
           googleId: payload.sub,
           avatar: payload.picture,
           isVerified: true,
@@ -251,6 +298,10 @@ export const loginWithGoogle = asyncHandler(
     }
 
     if (!user) throw new ApiError(500, "Unable to create Google account");
+    if (payload.picture && user.avatar !== payload.picture) {
+      user.avatar = payload.picture;
+      await user.save({ validateBeforeSave: false });
+    }
     await issueLoginResponse(user, res);
   },
 );

@@ -1,18 +1,16 @@
-import { Router } from "express";
+import { Router, type RequestHandler } from "express";
 import { z } from "zod";
 import { validate } from "../middleware/validate";
 import { verifyJWT } from "../middleware/auth";
 import { authLimiter } from "../middleware/rateLimiter";
+import { ApiError } from "../utils/ApiError";
 import {
-  register,
-  sendOtp,
+  registerWithEmail,
   loginWithEmail,
-  verifyOtpAndLogin,
+  loginWithEmailPassword,
   loginWithGoogle,
   logout,
   refreshAccessToken,
-  forgotPassword,
-  resetPassword,
   changePassword,
   getMe,
   updateMe,
@@ -23,42 +21,22 @@ import {
 
 const router = Router();
 
-// ─── Validation schemas ───────────────────────────────────────────────────────
-
-const registerSchema = z.object({
-  name: z.string().min(2, "Name must be at least 2 characters").max(50),
-  phone: z
-    .string()
-    .regex(/^\+?[0-9]{10,15}$/, "Enter a valid phone number"),
-  password: z.string().min(6, "Password must be at least 6 characters"),
-  email: z.string().email("Enter a valid email").optional(),
-});
-
-const sendOtpSchema = z.object({
-  phone: z.string().regex(/^\+?[0-9]{10,15}$/, "Enter a valid phone number"),
-  purpose: z.enum(["login", "register"]).default("login"),
-  adminOnly: z.boolean().optional().default(false),
-});
-
-const verifyOtpSchema = z.object({
-  phone: z.string().regex(/^\+?[0-9]{10,15}$/, "Enter a valid phone number"),
-  otp: z.string().length(6, "OTP must be exactly 6 digits"),
-  password: z.string().min(1, "Password is required"),
-});
+const phoneAuthTemporarilyUnavailable: RequestHandler = (_req, _res, next) => {
+  next(new ApiError(
+    503,
+    "Phone-based sign-in and password recovery are temporarily unavailable. Please continue with Google.",
+  ));
+};
 
 const emailLoginSchema = z.object({
   email: z.string().email("Enter a valid email"),
   password: z.string().min(1, "Password is required"),
 });
 
-const forgotPasswordSchema = z.object({
-  phone: z.string().regex(/^\+?[0-9]{10,15}$/, "Enter a valid phone number"),
-});
-
-const resetPasswordSchema = z.object({
-  phone: z.string().regex(/^\+?[0-9]{10,15}$/, "Enter a valid phone number"),
-  otp: z.string().length(6, "OTP must be exactly 6 digits"),
-  newPassword: z.string().min(6, "Password must be at least 6 characters"),
+const emailRegisterSchema = z.object({
+  name: z.string().trim().min(2, "Name must be at least 2 characters").max(50),
+  email: z.string().trim().email("Enter a valid email"),
+  password: z.string().min(8, "Password must be at least 8 characters"),
 });
 
 const updateMeSchema = z.object({
@@ -83,14 +61,17 @@ const updateAddressSchema = addressSchema.partial();
 
 // ─── Public routes ────────────────────────────────────────────────────────────
 
-router.post("/register",         authLimiter, validate(registerSchema),       register);
-router.post("/send-otp",         authLimiter, validate(sendOtpSchema),        sendOtp);
+// Email/password and Google customer sign-in remain available without SMS.
+router.post("/register",         authLimiter, validate(emailRegisterSchema), registerWithEmail);
+router.post("/login",            authLimiter, validate(emailLoginSchema),    loginWithEmailPassword);
+// SMS-dependent customer authentication remains disabled until MSG91 is enabled.
+router.post("/send-otp",         authLimiter, phoneAuthTemporarilyUnavailable);
 router.post("/email-login",      authLimiter, validate(emailLoginSchema),     loginWithEmail);
-router.post("/verify-otp",       authLimiter, validate(verifyOtpSchema),      verifyOtpAndLogin);
+router.post("/verify-otp",       authLimiter, phoneAuthTemporarilyUnavailable);
 router.post("/google",            authLimiter, validate(z.object({ credential: z.string().min(1) })), loginWithGoogle);
 router.post("/refresh-token",                                                   refreshAccessToken);
-router.post("/forgot-password",  authLimiter, validate(forgotPasswordSchema), forgotPassword);
-router.post("/reset-password",   authLimiter, validate(resetPasswordSchema),  resetPassword);
+router.post("/forgot-password",  authLimiter, phoneAuthTemporarilyUnavailable);
+router.post("/reset-password",   authLimiter, phoneAuthTemporarilyUnavailable);
 
 // ─── Protected routes ─────────────────────────────────────────────────────────
 

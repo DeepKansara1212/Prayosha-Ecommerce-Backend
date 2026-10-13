@@ -64,6 +64,12 @@ export interface IUser extends Document {
 
 export type IUserModel = Model<IUser>;
 
+const normalizeOptionalPhone = (value?: string | null): string | undefined => {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length ? trimmed : undefined;
+};
+
 // ─── User schema ──────────────────────────────────────────────────────────────
 
 const userSchema = new Schema<IUser, IUserModel>(
@@ -76,7 +82,13 @@ const userSchema = new Schema<IUser, IUserModel>(
       lowercase: true,
       trim: true,
     },
-    phone: { type: String, unique: true, sparse: true, trim: true },
+    phone: {
+      type: String,
+      unique: true,
+      sparse: true,
+      trim: true,
+      set: normalizeOptionalPhone,
+    },
     password: {
       type: String,
       minlength: [6, "Password must be at least 6 characters"],
