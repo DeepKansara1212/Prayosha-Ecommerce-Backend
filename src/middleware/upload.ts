@@ -107,17 +107,22 @@ export interface CloudinaryUploadResult {
   bytes: number;
 }
 
-export const uploadToCloudinary = (
+const uploadBufferToCloudinary = (
   buffer: Buffer,
-  folder = "prayosha-products",
+  folder: string,
+  preserveOriginal: boolean,
 ): Promise<CloudinaryUploadResult> => {
   return new Promise((resolve, reject) => {
     const stream = cloudinary.uploader.upload_stream(
       {
         folder,
-        transformation: [
-          { width: 1200, height: 1200, crop: "limit", quality: "auto" },
-        ],
+        ...(preserveOriginal
+          ? {}
+          : {
+              transformation: [
+                { width: 1200, height: 1200, crop: "limit", quality: "auto" },
+              ],
+            }),
         allowed_formats: ["jpg", "jpeg", "png", "webp"],
       },
       (error, result) => {
@@ -137,6 +142,20 @@ export const uploadToCloudinary = (
     );
     stream.end(buffer);
   });
+};
+
+export const uploadToCloudinary = (
+  buffer: Buffer,
+  folder = "prayosha-products",
+): Promise<CloudinaryUploadResult> => {
+  return uploadBufferToCloudinary(buffer, folder, false);
+};
+
+export const uploadOriginalToCloudinary = (
+  buffer: Buffer,
+  folder: string,
+): Promise<CloudinaryUploadResult> => {
+  return uploadBufferToCloudinary(buffer, folder, true);
 };
 
 // ─── Delete by public_id ──────────────────────────────────────────────────────

@@ -40,6 +40,7 @@ export interface IProduct extends Document {
   shape?: string;
   color?: string;
   purposeTags?: Types.ObjectId[];
+  meaningTags?: Types.ObjectId[];
   rudrakshaFaces?: string;
   beadSize?: string;
   noOfSticks?: number;
@@ -79,6 +80,7 @@ const productSchema = new Schema<IProduct>(
     shape: { type: String, trim: true, maxlength: 100 },
     color: { type: String, trim: true, maxlength: 100 },
     purposeTags: { type: [Schema.Types.ObjectId], ref: "Purpose", default: [] },
+    meaningTags: { type: [Schema.Types.ObjectId], ref: "Meaning", default: [] },
     rudrakshaFaces: { type: String, trim: true, maxlength: 50 },
     beadSize: { type: String, trim: true, maxlength: 50 },
     noOfSticks: { type: Number, min: 1 },
@@ -129,6 +131,7 @@ const productSchema = new Schema<IProduct>(
 
 productSchema.index({ category: 1 });
 productSchema.index({ purposeTags: 1 });
+productSchema.index({ meaningTags: 1 });
 productSchema.index({ isFeatured: 1, isActive: 1 });
 productSchema.index({ name: "text", description: "text", tags: "text" });
 

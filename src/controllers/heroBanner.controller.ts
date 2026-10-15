@@ -3,7 +3,10 @@ import { asyncHandler } from "../utils/asyncHandler";
 import { ApiError } from "../utils/ApiError";
 import { ApiResponse } from "../utils/ApiResponse";
 import { HeroBanner } from "../models/heroBanner.model";
-import { uploadToCloudinary, deleteFromCloudinary } from "../middleware/upload";
+import {
+  uploadOriginalToCloudinary,
+  deleteFromCloudinary,
+} from "../middleware/upload";
 
 // ─── GET /api/v1/hero-banners ─────────────────────────────────────────────────
 
@@ -38,7 +41,7 @@ export const createBanner = asyncHandler(
       isActive?: string;
     };
 
-    const uploaded = await uploadToCloudinary(req.file.buffer, "prayosha-banners");
+    const uploaded = await uploadOriginalToCloudinary(req.file.buffer, "prayosha-banners");
 
     const banner = await HeroBanner.create({
       imageUrl: uploaded.secure_url,
@@ -67,7 +70,7 @@ export const updateBanner = asyncHandler(
     // Replace image if a new file was uploaded
     if (req.file) {
       await deleteFromCloudinary(banner.imagePublicId);
-      const uploaded = await uploadToCloudinary(req.file.buffer, "prayosha-banners");
+      const uploaded = await uploadOriginalToCloudinary(req.file.buffer, "prayosha-banners");
       banner.imageUrl = uploaded.secure_url;
       banner.imagePublicId = uploaded.public_id;
     }

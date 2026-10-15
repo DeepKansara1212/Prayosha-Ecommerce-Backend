@@ -55,4 +55,40 @@ describe("product validation", () => {
       expect(result.data.price).toBeNull();
     }
   });
+
+  it("accepts multiple purpose collection assignments", () => {
+    const result = createProductSchema.safeParse({
+      ...validProduct,
+      purposeTags: [
+        "507f1f77bcf86cd799439011",
+        "507f191e810c19729de860ea",
+      ],
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.purposeTags).toEqual([
+        "507f1f77bcf86cd799439011",
+        "507f191e810c19729de860ea",
+      ]);
+    }
+  });
+
+  it("accepts multiple meaning assignments", () => {
+    const result = createProductSchema.safeParse({
+      ...validProduct,
+      meaningTags: [
+        "507f1f77bcf86cd799439011",
+        "507f191e810c19729de860ea",
+      ],
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.meaningTags).toEqual([
+        "507f1f77bcf86cd799439011",
+        "507f191e810c19729de860ea",
+      ]);
+    }
+  });
 });

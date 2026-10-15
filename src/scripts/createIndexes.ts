@@ -38,6 +38,7 @@ async function createIndexes(): Promise<void> {
   const products = db.collection("products");
   await ensureIndex(products, { slug: 1 }, { unique: true });
   await ensureIndex(products, { category: 1, isActive: 1 });
+  await ensureIndex(products, { meaningTags: 1 });
   await ensureIndex(products, { isFeatured: 1, isActive: 1 });
   await ensureIndex(
     products,

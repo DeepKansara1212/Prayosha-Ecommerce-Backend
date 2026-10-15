@@ -76,6 +76,7 @@ export const getProducts = asyncHandler(
       badge,
       chakra,
       purpose,
+      meaning,
       subCategory,
       inStock,
       page = "1",
@@ -136,6 +137,21 @@ export const getProducts = asyncHandler(
         return;
       }
       filter.purposeTags = new Types.ObjectId(purpose);
+    }
+
+    // Meaning filter — matches products assigned to the selected meaning.
+    if (meaning) {
+      if (!Types.ObjectId.isValid(meaning)) {
+        res.status(200).json(
+          new ApiResponse(
+            200,
+            { products: [], pagination: paginate(pageNum, limitNum, 0) },
+            "Products fetched"
+          )
+        );
+        return;
+      }
+      filter.meaningTags = new Types.ObjectId(meaning);
     }
 
     // Sub-category filter — accepts a SubCategory id.
@@ -299,6 +315,7 @@ export const createProduct = asyncHandler(
       shape,
       color,
       purposeTags,
+      meaningTags,
       rudrakshaFaces,
       badge,
       beadSize,
@@ -362,6 +379,7 @@ export const createProduct = asyncHandler(
       shape,
       color,
       purposeTags: purposeTags ?? [],
+      meaningTags: meaningTags ?? [],
       rudrakshaFaces,
       beadSize,
       noOfSticks,
@@ -429,6 +447,7 @@ export const updateProduct = asyncHandler(
       "shape",
       "color",
       "purposeTags",
+      "meaningTags",
       "rudrakshaFaces",
       "beadSize",
       "noOfSticks",

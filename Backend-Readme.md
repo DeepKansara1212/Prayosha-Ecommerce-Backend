@@ -358,11 +358,27 @@ Legend: **Public** · **JWT** · **Admin** (JWT + `role: "admin"`)
 | `sort` | `newest` (default), `price_asc`, `price_desc`, `featured`, `name_asc` |
 | `minPrice`, `maxPrice` | Price range |
 | `badge` | Uppercased badge match |
+| `purpose` | Purpose ObjectId matched against `purposeTags` |
+| `meaning` | Meaning ObjectId matched against `meaningTags` |
 | `chakra` | Case-insensitive exact |
 | `inStock` | `true` → `stock > 0` |
 | `page`, `limit` | Pagination (limit max 48, default 12) |
 
 **Images `POST /:id/images`:** multipart field `images` (max 6 files) + body `existingImages` (JSON string array of URLs to keep). Removes dropped images from Cloudinary; final list capped at 6.
+
+---
+
+### Meanings — `/api/v1/meanings`
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/` | Public | List active meanings for storefront filters |
+| GET | `/api/v1/admin/meanings` | Admin | List meanings with product counts |
+| POST | `/api/v1/admin/meanings` | Admin | Create a meaning |
+| PATCH | `/api/v1/admin/meanings/:id` | Admin | Update a meaning |
+| DELETE | `/api/v1/admin/meanings/:id` | Admin | Delete a meaning |
+
+Meanings are a product taxonomy independent of Rudraksha calculator purposes. Products store their selected meaning IDs in `meaningTags`.
 
 ---
 
@@ -645,6 +661,7 @@ Each mapping resource has `priority` (display order) and `active` (soft toggle) 
 | `price`, `comparePrice?`, `costPrice?` | number | costPrice excluded from queries |
 | `images[]` | string[] | max 6 Cloudinary URLs |
 | `category` | ObjectId | Category ref |
+| `purposeTags[]`, `meaningTags[]` | ObjectId[] | Purpose and Meaning refs used for storefront filtering |
 | `tags[]`, `chakra?`, `badge?` | | badge enum: BESTSELLER, NEW, LIMITED, RARE, GIFT SET |
 | `stock`, `lowStockThreshold` | number | defaults 0, 5 |
 | `weight?`, `dimensions?` | | optional |
@@ -653,6 +670,15 @@ Each mapping resource has `priority` (display order) and `active` (soft toggle) 
 | `ratings` | `{ average, count }` | |
 
 Slug auto-generated from `name` on save.
+
+---
+
+### Meaning (`meanings`)
+
+| Field | Type | Notes |
+|---|---|---|
+| `name` | string | required, trimmed |
+| `active` | boolean | default true; inactive meanings are omitted from storefront filters |
 
 ---
 

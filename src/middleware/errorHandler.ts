@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from "express";
+import multer from "multer";
 import { ApiError } from "../utils/ApiError";
 import { env } from "../config/env";
 
@@ -33,6 +34,12 @@ export const errorHandler = (
     statusCode = err.statusCode;
     message = err.message;
     errors = err.errors;
+  } else if (err instanceof multer.MulterError) {
+    statusCode = err.code === "LIMIT_FILE_SIZE" ? 413 : 400;
+    message =
+      err.code === "LIMIT_FILE_SIZE"
+        ? "Uploaded file exceeds the 20 MB limit"
+        : err.message;
   } else if (isDuplicateKeyError(err)) {
     // Unique-index collision (slug, SKU, coupon code, etc.) — surface as a
     // clean 409 instead of an opaque 500 from the raw MongoDB driver error.

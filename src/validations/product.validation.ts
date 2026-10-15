@@ -35,6 +35,7 @@ export const createProductSchema = z.object({
   shape: z.string().trim().max(100).optional(),
   color: z.string().trim().max(100).optional(),
   purposeTags: z.array(objectId).optional(),
+  meaningTags: z.array(objectId).optional(),
   rudrakshaFaces: z.string().trim().max(50).optional(),
   beadSize: z.string().trim().max(50).optional(),
   noOfSticks: z.number().int().min(1).optional(),
