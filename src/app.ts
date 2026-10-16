@@ -43,6 +43,8 @@ import { adminCalculatorLeadRouter } from "./routes/calculatorLead.routes";
 
 const app = express();
 
+app.set("trust proxy", 1);
+
 // Security headers
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors(corsOptions));

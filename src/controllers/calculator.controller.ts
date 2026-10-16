@@ -16,14 +16,6 @@ export const submitBraceletCalculator = asyncHandler(
   async (req: Request, res: Response): Promise<void> => {
     const { name, dob, tob, birthLocation, mobile } = req.body;
 
-    await CalculatorLead.create({
-      name,
-      mobile,
-      dob,
-      birthLocation,
-      calculatorType: "bracelet",
-    });
-
     const rashiResult = resolveMoonRashi(dob, tob ?? null, { timezone: birthLocation.timezone });
 
     if (!rashiResult.resolved) {
@@ -38,6 +30,14 @@ export const submitBraceletCalculator = asyncHandler(
         );
       return;
     }
+
+    await CalculatorLead.create({
+      name,
+      mobile,
+      dob,
+      birthLocation,
+      calculatorType: "bracelet",
+    });
 
     const recommendedProducts = await getBraceletsForRashi(rashiResult.rashiCode);
     res
