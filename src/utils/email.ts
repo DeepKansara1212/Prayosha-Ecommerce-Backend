@@ -61,7 +61,7 @@ export async function sendOrderConfirmationEmail(
           <tr>
             <td style="background:#1C1A17;padding:28px 40px;text-align:center;">
               <p style="margin:0;font-size:10px;letter-spacing:0.14em;text-transform:uppercase;color:#C4A35A;">
-                Prayosha Crystal
+                prayosha crystals
               </p>
               <p style="margin:8px 0 0;font-size:22px;font-weight:600;letter-spacing:0.04em;color:#F5F0E8;">
                 Order Confirmed
@@ -147,7 +147,7 @@ export async function sendOrderConfirmationEmail(
           <tr>
             <td style="padding:32px 40px;text-align:center;border-top:1px solid #E2DAC8;margin-top:28px;">
               <p style="margin:0 0 6px;font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:#C4A35A;">
-                Prayosha Crystal
+                prayosha crystals
               </p>
               <p style="margin:0;font-size:12px;color:#9E9590;line-height:1.6;">
                 Questions? Reply to this email and we'll be happy to help.
@@ -163,9 +163,9 @@ export async function sendOrderConfirmationEmail(
 </html>`;
 
     await transporter.sendMail({
-      from: `"Prayosha Crystal" <${env.EMAIL_USER}>`,
+      from: `"prayosha crystals" <${env.EMAIL_USER}>`,
       to: user.email,
-      subject: `Order Confirmed — #${order.orderNumber} | Prayosha Crystal`,
+      subject: `Order Confirmed — #${order.orderNumber} | prayosha crystals`,
       html,
     });
   } catch (err) {
@@ -199,7 +199,7 @@ export async function sendContactInquiryEmail(message: {
   ].join("\n");
 
   await transporter.sendMail({
-    from: `"Prayosha Crystal" <${env.EMAIL_USER}>`,
+    from: `"prayosha crystals" <${env.EMAIL_USER}>`,
     to: env.CONTACT_EMAIL,
     replyTo: message.email,
     subject: `Website inquiry: ${message.subject}`,

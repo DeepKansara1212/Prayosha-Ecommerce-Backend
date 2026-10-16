@@ -12,23 +12,23 @@ describe("product validation", () => {
   it("preserves product measurements when creating a product", () => {
     const result = createProductSchema.safeParse({
       ...validProduct,
-      productDetails: { weight: "120 g", length: "8 cm", dimensions: "8 x 4 x 2 cm", size: "M" },
+      productDetails: { weight: "120 g", length: "8 cm", dimensions: "8 x 4 x 2 cm", size: "M", ingredients: "Amethyst, silver" },
     });
 
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.productDetails).toEqual({ weight: "120 g", length: "8 cm", dimensions: "8 x 4 x 2 cm", size: "M" });
+      expect(result.data.productDetails).toEqual({ weight: "120 g", length: "8 cm", dimensions: "8 x 4 x 2 cm", size: "M", ingredients: "Amethyst, silver" });
     }
   });
 
   it("preserves product measurements when updating a product", () => {
     const result = updateProductSchema.safeParse({
-      productDetails: { weight: "250 g", dimensions: "10 x 5 x 3 cm", size: "L" },
+      productDetails: { weight: "250 g", dimensions: "10 x 5 x 3 cm", size: "L", ingredients: "Rose quartz" },
     });
 
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.productDetails).toEqual({ weight: "250 g", dimensions: "10 x 5 x 3 cm", size: "L" });
+      expect(result.data.productDetails).toEqual({ weight: "250 g", dimensions: "10 x 5 x 3 cm", size: "L", ingredients: "Rose quartz" });
     }
   });
 

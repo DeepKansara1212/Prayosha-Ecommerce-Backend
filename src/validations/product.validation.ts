@@ -15,6 +15,7 @@ const productDetailsSchema = z.object({
   height: z.string().optional(),
   dimensions: z.string().optional(),
   size: z.string().optional(),
+  ingredients: z.string().optional(),
 });
 
 const objectId = z.string().regex(/^[0-9a-fA-F]{24}$/, "Invalid id");

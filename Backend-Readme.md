@@ -1,6 +1,6 @@
 ﻿# Prayosha Backend
 
-Production-ready REST API for the **Prayosha Crystal** e-commerce platform. Built with Express 4, TypeScript 5, and MongoDB (Mongoose 8). Powers the customer storefront, admin dashboard, payments (Razorpay), image hosting (Cloudinary), and content (blogs, hero banners).
+Production-ready REST API for the **prayosha crystals** e-commerce platform. Built with Express 4, TypeScript 5, and MongoDB (Mongoose 8). Powers the customer storefront, admin dashboard, payments (Razorpay), image hosting (Cloudinary), and content (blogs, hero banners).
 
 ---
 

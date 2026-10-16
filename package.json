@@ -1,7 +1,7 @@
 {
   "name": "prayosha-backend",
   "version": "1.0.0",
-  "description": "Backend API for Prayosha Crystal - Luxury Spiritual Crystal Shop",
+  "description": "Backend API for prayosha crystals - Luxury Spiritual Crystal Shop",
   "main": "dist/server.js",
   "scripts": {
     "dev": "nodemon",

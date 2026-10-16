@@ -15,6 +15,7 @@ export interface IProductDetails {
   height?: string;
   dimensions?: string;
   size?: string;
+  ingredients?: string;
 }
 
 interface IRatings {
@@ -109,6 +110,7 @@ const productSchema = new Schema<IProduct>(
           height: { type: String, trim: true },
           dimensions: { type: String, trim: true },
           size: { type: String, trim: true },
+          ingredients: { type: String, trim: true },
         },
         { _id: false }
       ),
