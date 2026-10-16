@@ -2,7 +2,7 @@ import { Request, Response } from "express";
 import { asyncHandler } from "../utils/asyncHandler";
 import { ApiResponse } from "../utils/ApiResponse";
 import { ApiError } from "../utils/ApiError";
-import { Order } from "../models/order.model";
+import { Order, ORDER_VISIBILITY_FILTER } from "../models/order.model";
 import { Product } from "../models/product.model";
 import { User } from "../models/user.model";
 
@@ -59,10 +59,13 @@ export const getOverview = asyncHandler(
       ]),
 
       // Total orders (all statuses)
-      Order.countDocuments(),
+      Order.countDocuments(ORDER_VISIBILITY_FILTER),
 
       // Orders placed today
-      Order.countDocuments({ createdAt: { $gte: todayStart } }),
+      Order.countDocuments({
+        ...ORDER_VISIBILITY_FILTER,
+        createdAt: { $gte: todayStart },
+      }),
 
       // Revenue today (paid only)
       Order.aggregate([
@@ -180,6 +183,7 @@ export const getSalesOverTime = asyncHandler(
 export const getOrdersByStatus = asyncHandler(
   async (_req: Request, res: Response): Promise<void> => {
     const result = await Order.aggregate([
+      { $match: ORDER_VISIBILITY_FILTER },
       { $group: { _id: "$status", count: { $sum: 1 } } },
       { $sort: { count: -1 } },
       { $project: { _id: 0, status: "$_id", count: 1 } },
@@ -198,7 +202,7 @@ export const getRecentOrders = asyncHandler(
     const rawLimit = parseInt((req.query.limit as string) ?? "10", 10);
     const limit = isNaN(rawLimit) || rawLimit < 1 ? 10 : Math.min(rawLimit, 50);
 
-    const orders = await Order.find()
+    const orders = await Order.find(ORDER_VISIBILITY_FILTER)
       .sort({ createdAt: -1 })
       .limit(limit)
       .populate("user", "name email")

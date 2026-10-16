@@ -1,6 +1,6 @@
 import { Schema, model, Document, Types } from "mongoose";
 
-interface IOrderItem {
+export interface IOrderItem {
   product: Types.ObjectId;
   name: string;
   image: string;
@@ -9,7 +9,7 @@ interface IOrderItem {
   quantity: number;
 }
 
-interface IShippingAddress {
+export interface IShippingAddress {
   fullName: string;
   phone: string;
   line1: string;
@@ -73,6 +73,13 @@ export interface IOrder extends Document {
   createdAt: Date;
   updatedAt: Date;
 }
+
+export const ORDER_VISIBILITY_FILTER = {
+  $or: [
+    { paymentMethod: "cod" },
+    { paymentStatus: { $in: ["paid", "refunded"] } },
+  ],
+};
 
 const orderItemSchema = new Schema<IOrderItem>(
   {
@@ -171,6 +178,6 @@ const orderSchema = new Schema<IOrder>(
 );
 
 orderSchema.index({ user: 1, createdAt: -1 });
-orderSchema.index({ razorpayOrderId: 1 }, { sparse: true });
+orderSchema.index({ razorpayOrderId: 1 }, { sparse: true, unique: true });
 
 export const Order = model<IOrder>("Order", orderSchema);

@@ -5,6 +5,7 @@ import { asyncHandler } from "../utils/asyncHandler";
 import { ApiError } from "../utils/ApiError";
 import { ApiResponse } from "../utils/ApiResponse";
 import { Order } from "../models/order.model";
+import { PaymentAttempt, IPaymentAttempt } from "../models/paymentAttempt.model";
 import { Cart } from "../models/cart.model";
 import { Product } from "../models/product.model";
 import { User } from "../models/user.model";
@@ -16,7 +17,7 @@ import { env } from "../config/env";
 import { paginate } from "../utils/pagination";
 import { sendOrderConfirmationEmail } from "../utils/email";
 import { FilterQuery, Types } from "mongoose";
-import { IOrder } from "../models/order.model";
+import { IOrder, ORDER_VISIBILITY_FILTER } from "../models/order.model";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -163,39 +164,104 @@ async function finalizePaidOrder(
   order: IOrder,
   razorpayPaymentId: string,
   note: string
-): Promise<{ pointsEarned: number; newPointsBalance: number }> {
-  order.paymentStatus = "paid";
-  order.status = "confirmed";
-  order.razorpayPaymentId = razorpayPaymentId;
-  order.statusHistory.push({ status: "confirmed", note, timestamp: new Date() });
-  await order.save();
+): Promise<{ order: IOrder; pointsEarned: number; newPointsBalance: number }> {
+  const paidOrder = await Order.findOneAndUpdate(
+    { _id: order._id, paymentStatus: { $in: ["pending", "failed"] } },
+    {
+      $set: {
+        paymentStatus: "paid",
+        status: "confirmed",
+        razorpayPaymentId,
+      },
+      $push: {
+        statusHistory: { status: "confirmed", note, timestamp: new Date() },
+      },
+    },
+    { new: true }
+  );
+
+  if (!paidOrder) {
+    const currentOrder = await Order.findById(order._id);
+    if (!currentOrder || currentOrder.paymentStatus !== "paid")
+      throw new ApiError(409, "Order payment is already being processed");
+
+    const currentUser = await User.findById(currentOrder.user).select("rewardPoints");
+    return {
+      order: currentOrder,
+      pointsEarned: currentOrder.pointsEarned,
+      newPointsBalance: currentUser?.rewardPoints ?? 0,
+    };
+  }
 
   // Decrement stock
-  for (const item of order.items) {
+  for (const item of paidOrder.items) {
     await Product.findByIdAndUpdate(item.product, {
       $inc: { stock: -item.quantity },
     });
   }
 
   // Increment coupon usage
-  if (order.couponCode) {
+  if (paidOrder.couponCode) {
     await Coupon.findOneAndUpdate(
-      { code: order.couponCode },
+      { code: paidOrder.couponCode },
       { $inc: { usedCount: 1 } }
     );
   }
 
   // Clear cart
   await Cart.findOneAndUpdate(
-    { user: order.user },
+    { user: paidOrder.user },
     { $set: { items: [], couponApplied: undefined } }
   );
 
   // Fire-and-forget — email.ts catches and logs failures internally
-  const user = await User.findById(order.user).select("name email");
-  if (user) void sendOrderConfirmationEmail(order, user);
+  const user = await User.findById(paidOrder.user).select("name email");
+  if (user) void sendOrderConfirmationEmail(paidOrder, user);
 
-  return applyRewardsAndGift(order, order.user as Types.ObjectId);
+  return {
+    order: paidOrder,
+    ...(await applyRewardsAndGift(paidOrder, paidOrder.user as Types.ObjectId)),
+  };
+}
+
+async function completeRazorpayAttempt(
+  attempt: IPaymentAttempt,
+  razorpayPaymentId: string,
+  note: string
+): Promise<{ order: IOrder; pointsEarned: number; newPointsBalance: number }> {
+  let order = await Order.findOne({ razorpayOrderId: attempt.razorpayOrderId });
+
+  if (!order) {
+    const orderNumber = await generateOrderNumber();
+    order = await Order.create({
+      orderNumber,
+      user: attempt.user,
+      items: attempt.items,
+      shippingAddress: attempt.shippingAddress,
+      subtotal: attempt.subtotal,
+      discount: attempt.discount,
+      couponCode: attempt.couponCode,
+      shippingCharge: attempt.shippingCharge,
+      tax: attempt.tax,
+      total: attempt.total,
+      paymentMethod: "razorpay",
+      paymentStatus: "pending",
+      razorpayOrderId: attempt.razorpayOrderId,
+      status: "placed",
+      statusHistory: [
+        { status: "placed", note: "Razorpay payment captured", timestamp: new Date() },
+      ],
+      notes: attempt.notes,
+    });
+  }
+
+  const finalized = await finalizePaidOrder(order, razorpayPaymentId, note);
+
+  attempt.status = "paid";
+  attempt.razorpayPaymentId = razorpayPaymentId;
+  await attempt.save();
+
+  return finalized;
 }
 
 // ─── POST /api/v1/cart/coupon/validate ────────────────────────────────────────
@@ -358,17 +424,16 @@ export const createRazorpayOrder = asyncHandler(
     const tax = 0;
     const total = subtotal - discount + shippingCharge + tax;
 
-    const orderNumber = await generateOrderNumber();
     const rzp = getRazorpay();
 
     const rzpOrder = (await rzp.orders.create({
       amount: Math.round(total * 100), // paise
       currency: "INR",
-      receipt: orderNumber,
+      receipt: `checkout_${new Types.ObjectId().toString()}`,
     })) as any;
 
-    const order = await Order.create({
-      orderNumber,
+    await PaymentAttempt.create({
+      razorpayOrderId: rzpOrder.id,
       user: userId,
       items: orderItems,
       shippingAddress: {
@@ -386,17 +451,7 @@ export const createRazorpayOrder = asyncHandler(
       shippingCharge,
       tax,
       total,
-      paymentMethod: "razorpay",
-      paymentStatus: "pending",
-      razorpayOrderId: rzpOrder.id,
-      status: "placed",
-      statusHistory: [
-        {
-          status: "placed",
-          note: "Razorpay payment initiated",
-          timestamp: new Date(),
-        },
-      ],
+      status: "pending",
       notes,
     });
 
@@ -408,8 +463,6 @@ export const createRazorpayOrder = asyncHandler(
           amount: rzpOrder.amount,
           currency: rzpOrder.currency,
           key: env.RAZORPAY_KEY_ID,
-          orderNumber: order.orderNumber,
-          orderId: order._id,
         },
         "Razorpay order created"
       )
@@ -428,12 +481,21 @@ export const verifyRazorpayPayment = asyncHandler(
         razorpay_signature: string;
       };
 
-    const order = await Order.findOne({ razorpayOrderId: razorpay_order_id });
-    if (!order) throw new ApiError(404, "Order not found");
+    const order = await Order.findOne({
+      razorpayOrderId: razorpay_order_id,
+      user: req.user!._id,
+    });
+    const attempt = await PaymentAttempt.findOne({
+      razorpayOrderId: razorpay_order_id,
+      user: req.user!._id,
+    });
+    if (!order && !attempt) throw new ApiError(404, "Order not found");
 
     // Verify only if currently pending — prevents duplicate processing
-    if (order.paymentStatus !== "pending")
+    if (order && order.paymentStatus !== "pending")
       throw new ApiError(400, `Payment already ${order.paymentStatus}`);
+    if (attempt && attempt.status === "paid")
+      throw new ApiError(400, "Payment already paid");
 
     // HMAC SHA256 verification
     const expectedSignature = crypto
@@ -442,29 +504,88 @@ export const verifyRazorpayPayment = asyncHandler(
       .digest("hex");
 
     if (expectedSignature !== razorpay_signature) {
-      order.paymentStatus = "failed";
-      order.statusHistory.push({
-        status: "failed",
-        note: "Razorpay signature verification failed",
-        timestamp: new Date(),
-      });
-      await order.save();
+      if (order) {
+        order.paymentStatus = "failed";
+        order.status = "cancelled";
+        order.statusHistory.push({
+          status: "cancelled",
+          note: "Razorpay signature verification failed",
+          timestamp: new Date(),
+        });
+        await order.save();
+      }
+      if (attempt) {
+        attempt.status = "failed";
+        await attempt.save();
+      }
       throw new ApiError(400, "Payment signature is invalid");
     }
 
     // Payment verified — update order and run post-payment side effects
-    const { pointsEarned, newPointsBalance } = await finalizePaidOrder(
-      order,
-      razorpay_payment_id,
-      "Payment verified via Razorpay"
-    );
+    let result: {
+      order: IOrder;
+      pointsEarned: number;
+      newPointsBalance: number;
+    };
+    if (attempt) {
+      result = await completeRazorpayAttempt(
+        attempt,
+        razorpay_payment_id,
+        "Payment verified via Razorpay"
+      );
+    } else if (order) {
+      result = await finalizePaidOrder(
+        order,
+        razorpay_payment_id,
+        "Payment verified via Razorpay"
+      );
+    } else {
+      throw new ApiError(404, "Payment attempt not found");
+    }
 
     res.status(200).json(
       new ApiResponse(
         200,
-        { order, pointsEarned, newPointsBalance },
+        result,
         "Payment verified successfully"
       )
+    );
+  }
+);
+
+// ─── POST /api/v1/orders/razorpay/fail ────────────────────────────────────────
+
+export const failRazorpayPayment = asyncHandler(
+  async (req: Request, res: Response): Promise<void> => {
+    const { razorpay_order_id } = req.body as { razorpay_order_id: string };
+    const legacyOrder = await Order.findOne({
+      razorpayOrderId: razorpay_order_id,
+      user: req.user!._id,
+    });
+    const attempt = await PaymentAttempt.findOne({
+      razorpayOrderId: razorpay_order_id,
+      user: req.user!._id,
+    });
+
+    if (!legacyOrder && !attempt) throw new ApiError(404, "Payment attempt not found");
+
+    if (legacyOrder?.paymentStatus === "pending") {
+      legacyOrder.paymentStatus = "failed";
+      legacyOrder.status = "cancelled";
+      legacyOrder.statusHistory.push({
+        status: "cancelled",
+        note: "Razorpay payment failed or was cancelled",
+        timestamp: new Date(),
+      });
+      await legacyOrder.save();
+    }
+    if (attempt?.status === "pending") {
+      attempt.status = "failed";
+      await attempt.save();
+    }
+
+    res.status(200).json(
+      new ApiResponse(200, null, "Payment failure recorded")
     );
   }
 );
@@ -510,12 +631,34 @@ export const handleRazorpayWebhook = asyncHandler(
 
         // Skip if already paid — either the client already verified it, or
         // an earlier delivery of this same webhook already processed it.
-        if (order && order.paymentStatus !== "paid") {
-          await finalizePaidOrder(
-            order,
-            payment.id,
-            "Payment confirmed via Razorpay webhook (payment.captured)"
-          );
+        if (order) {
+          if (!["paid", "refunded"].includes(order.paymentStatus)) {
+            await finalizePaidOrder(
+              order,
+              payment.id,
+              "Payment confirmed via Razorpay webhook (payment.captured)"
+            );
+          }
+
+          const attempt = await PaymentAttempt.findOne({
+            razorpayOrderId: payment.order_id,
+          });
+          if (attempt && order.paymentStatus !== "refunded" && attempt.status !== "paid") {
+            attempt.status = "paid";
+            attempt.razorpayPaymentId = payment.id;
+            await attempt.save();
+          }
+        } else {
+          const attempt = await PaymentAttempt.findOne({
+            razorpayOrderId: payment.order_id,
+          });
+          if (attempt) {
+            await completeRazorpayAttempt(
+              attempt,
+              payment.id,
+              "Payment confirmed via Razorpay webhook (payment.captured)"
+            );
+          }
         }
       }
     }
@@ -533,7 +676,7 @@ export const getUserOrders = asyncHandler(
     const limit = Math.min(20, Math.max(1, parseInt(req.query.limit as string, 10) || 10));
     const skip = (page - 1) * limit;
 
-    const filter = { user: userId };
+    const filter = { user: userId, ...ORDER_VISIBILITY_FILTER };
     const [orders, total] = await Promise.all([
       Order.find(filter)
         .sort({ createdAt: -1 })
@@ -565,6 +708,11 @@ export const getOrderByNumber = asyncHandler(
 
     if (order.user.toString() !== req.user!._id.toString())
       throw new ApiError(403, "You do not have access to this order");
+    if (
+      order.paymentMethod === "razorpay" &&
+      !["paid", "refunded"].includes(order.paymentStatus)
+    )
+      throw new ApiError(404, "Order not found");
 
     res
       .status(200)
@@ -605,6 +753,9 @@ export const getAllOrders = asyncHandler(
     const skip = (pageNum - 1) * limitNum;
 
     const filter: FilterQuery<IOrder> = {};
+    const clauses: FilterQuery<IOrder>[] = [];
+
+    if (!paymentStatus) clauses.push(ORDER_VISIBILITY_FILTER);
 
     if (status) filter.status = status;
     if (paymentStatus) filter.paymentStatus = paymentStatus;
@@ -622,11 +773,15 @@ export const getAllOrders = asyncHandler(
       }).select("_id");
       const userIds = matchedUsers.map((u) => u._id);
 
-      filter.$or = [
-        { orderNumber: { $regex: search, $options: "i" } },
-        { user: { $in: userIds } },
-      ];
+      clauses.push({
+        $or: [
+          { orderNumber: { $regex: search, $options: "i" } },
+          { user: { $in: userIds } },
+        ],
+      });
     }
+
+    if (clauses.length) filter.$and = clauses;
 
     const [orders, total] = await Promise.all([
       Order.find(filter)
@@ -677,6 +832,13 @@ export const updateOrderStatus = asyncHandler(
 
     const order = await Order.findById(id);
     if (!order) throw new ApiError(404, "Order not found");
+
+    if (
+      order.paymentMethod === "razorpay" &&
+      !["paid", "refunded"].includes(order.paymentStatus) &&
+      status !== "cancelled"
+    )
+      throw new ApiError(400, "An unpaid Razorpay order cannot be processed");
 
     order.status = status as IOrder["status"];
     order.statusHistory.push({

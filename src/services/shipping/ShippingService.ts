@@ -46,6 +46,9 @@ export const ShippingService = {
     if (!["confirmed", "processing"].includes(order.status)) {
       throw new ApiError(400, "Order must be in confirmed or processing status to ship");
     }
+    if (order.paymentMethod === "razorpay" && order.paymentStatus !== "paid") {
+      throw new ApiError(400, "An unpaid Razorpay order cannot be shipped");
+    }
 
     const provider = await ShippingFactory.getProvider(providerSlug);
 

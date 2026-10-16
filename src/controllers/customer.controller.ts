@@ -2,7 +2,7 @@ import { Request, Response } from "express";
 import { asyncHandler } from "../utils/asyncHandler";
 import { ApiResponse } from "../utils/ApiResponse";
 import { User } from "../models/user.model";
-import { Order } from "../models/order.model";
+import { Order, ORDER_VISIBILITY_FILTER } from "../models/order.model";
 import { paginate } from "../utils/pagination";
 import { FilterQuery } from "mongoose";
 import { IUser } from "../models/user.model";
@@ -34,7 +34,7 @@ export const getCustomers = asyncHandler(
     // Aggregate order stats for this page of users
     const userIds = users.map(u => u._id);
     const stats = await Order.aggregate([
-      { $match: { user: { $in: userIds } } },
+      { $match: { user: { $in: userIds }, ...ORDER_VISIBILITY_FILTER } },
       {
         $group: {
           _id: "$user",

@@ -12,6 +12,10 @@ export const razorpayVerifySchema = z.object({
   razorpay_signature: z.string().min(1),
 });
 
+export const razorpayFailureSchema = z.object({
+  razorpay_order_id: z.string().min(1),
+});
+
 export const updateOrderStatusSchema = z.object({
   status: z.enum([
     "placed",

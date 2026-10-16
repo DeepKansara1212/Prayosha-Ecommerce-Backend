@@ -15,10 +15,19 @@ async function ensureIndex(
     sameDefinition(index) && (!options.name || index.name === options.name),
   );
 
-  if (matchingIndex) return;
+  if (
+    matchingIndex &&
+    Object.entries(options).every(([key, value]) => matchingIndex[key] === value)
+  )
+    return;
+
+  if (matchingIndex) {
+    await collection.dropIndex(matchingIndex.name);
+  }
 
   const conflictingIndex = existingIndexes.find((index: any) =>
-    sameDefinition(index) && index.name !== options.name,
+    sameDefinition(index) && index.name !== options.name &&
+    (!matchingIndex || index.name !== matchingIndex.name),
   );
 
   if (conflictingIndex) {
@@ -51,9 +60,21 @@ async function createIndexes(): Promise<void> {
   const orders = db.collection("orders");
   await ensureIndex(orders, { user: 1, createdAt: -1 });
   await ensureIndex(orders, { orderNumber: 1 }, { unique: true });
+  await ensureIndex(orders, { razorpayOrderId: 1 }, { unique: true, sparse: true });
   await ensureIndex(orders, { status: 1 });
   await ensureIndex(orders, { paymentStatus: 1 });
   console.log("✓ Order indexes");
+
+  // ── Payment attempt ──────────────────────────────────────────────────────────
+  const paymentAttemptCollections = await db
+    .listCollections({ name: "paymentattempts" }, { nameOnly: true })
+    .toArray();
+  if (paymentAttemptCollections.length === 0) {
+    await db.createCollection("paymentattempts");
+  }
+  const paymentAttempts = db.collection("paymentattempts");
+  await ensureIndex(paymentAttempts, { razorpayOrderId: 1 }, { unique: true });
+  console.log("✓ Payment attempt indexes");
 
   // ── User ─────────────────────────────────────────────────────────────────────
   const users = db.collection("users");

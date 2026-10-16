@@ -3,6 +3,7 @@ import {
   createOrderCOD,
   createRazorpayOrder,
   verifyRazorpayPayment,
+  failRazorpayPayment,
   getUserOrders,
   getOrderByNumber,
   getAllOrders,
@@ -14,6 +15,7 @@ import { validate } from "../middleware/validate";
 import {
   createOrderSchema,
   razorpayVerifySchema,
+  razorpayFailureSchema,
   updateOrderStatusSchema,
 } from "../validations/order.validation";
 
@@ -26,6 +28,7 @@ orderRouter.use(verifyJWT);
 orderRouter.post("/cod", validate(createOrderSchema), createOrderCOD);
 orderRouter.post("/razorpay/create", validate(createOrderSchema), createRazorpayOrder);
 orderRouter.post("/razorpay/verify", validate(razorpayVerifySchema), verifyRazorpayPayment);
+orderRouter.post("/razorpay/fail", validate(razorpayFailureSchema), failRazorpayPayment);
 orderRouter.get("/", getUserOrders);
 orderRouter.get("/:orderNumber", getOrderByNumber);
 
