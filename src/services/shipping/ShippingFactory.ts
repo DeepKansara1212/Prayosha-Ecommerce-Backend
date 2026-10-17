@@ -39,6 +39,12 @@ export const ShippingFactory = {
     if (!providerDoc.isActive) {
       throw new ApiError(400, `Shipping provider "${providerDoc.name}" is disabled`);
     }
+    if (!providerDoc.isVerified) {
+      throw new ApiError(
+        400,
+        `Shipping provider "${providerDoc.name}" has not passed a connection test`
+      );
+    }
 
     const credentials = providerDoc.decryptCredentials();
     if (!credentials) {
@@ -46,5 +52,20 @@ export const ShippingFactory = {
     }
 
     return buildInstance(slug, credentials);
+  },
+
+  async testProviderConnection(slug: string): Promise<void> {
+    const providerDoc = await ShippingProvider.findOne({ slug }).select("+credentialsEncrypted");
+    if (!providerDoc) {
+      throw new ApiError(400, `Shipping provider "${slug}" is not registered`);
+    }
+
+    const credentials = providerDoc.decryptCredentials();
+    if (!credentials) {
+      throw new ApiError(400, `Add credentials for "${providerDoc.name}" before testing the connection`);
+    }
+
+    const instance = buildInstance(slug, credentials);
+    await instance.testConnection();
   },
 };

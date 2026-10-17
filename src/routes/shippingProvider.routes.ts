@@ -3,6 +3,7 @@ import {
   getShippingProviders,
   updateShippingProvider,
   setDefaultShippingProvider,
+  testShippingProviderConnection,
 } from "../controllers/shippingProvider.controller";
 import { verifyJWT, verifyAdmin } from "../middleware/auth";
 import { validate } from "../middleware/validate";
@@ -19,3 +20,4 @@ adminShippingProviderRouter.patch(
   updateShippingProvider
 );
 adminShippingProviderRouter.post("/:id/set-default", setDefaultShippingProvider);
+adminShippingProviderRouter.post("/:id/test-connection", testShippingProviderConnection);

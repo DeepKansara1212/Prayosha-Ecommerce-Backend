@@ -3,6 +3,7 @@ import { asyncHandler } from "../utils/asyncHandler";
 import { ApiError } from "../utils/ApiError";
 import { ApiResponse } from "../utils/ApiResponse";
 import { ShippingProvider } from "../models/shippingProvider.model";
+import { ShippingFactory } from "../services/shipping/ShippingFactory";
 
 function toSafeProvider(doc: InstanceType<typeof ShippingProvider>) {
   const obj = doc.toObject();
@@ -37,10 +38,9 @@ export const updateShippingProvider = asyncHandler(
       credentials?: Record<string, unknown>;
     };
 
-    const provider = await ShippingProvider.findById(req.params.id);
+    const provider = await ShippingProvider.findById(req.params.id).select("+credentialsEncrypted");
     if (!provider) throw new ApiError(404, "Shipping provider not found");
 
-    if (typeof isActive === "boolean") provider.isActive = isActive;
     if (credentials) {
       // Copy-pasted keys routinely carry a trailing newline/space, which
       // AfterShip's gateway rejects as a malformed token before it ever
@@ -52,6 +52,19 @@ export const updateShippingProvider = asyncHandler(
         ])
       );
       provider.encryptCredentials(trimmed);
+      provider.isVerified = false;
+      provider.lastVerifiedAt = undefined;
+      provider.isActive = false;
+    }
+
+    if (typeof isActive === "boolean") {
+      if (isActive && !provider.isVerified) {
+        throw new ApiError(
+          400,
+          `Run "Test Connection" successfully for ${provider.name} before activating it`
+        );
+      }
+      provider.isActive = isActive;
     }
 
     await provider.save();
@@ -59,6 +72,27 @@ export const updateShippingProvider = asyncHandler(
     res
       .status(200)
       .json(new ApiResponse(200, { provider: toSafeProvider(provider) }, "Shipping provider updated"));
+  }
+);
+
+// ─── POST /api/v1/admin/shipping-providers/:id/test-connection ──────────────
+
+export const testShippingProviderConnection = asyncHandler(
+  async (req: Request, res: Response): Promise<void> => {
+    const provider = await ShippingProvider.findById(req.params.id);
+    if (!provider) throw new ApiError(404, "Shipping provider not found");
+
+    await ShippingFactory.testProviderConnection(provider.slug);
+
+    provider.isVerified = true;
+    provider.lastVerifiedAt = new Date();
+    await provider.save();
+
+    res
+      .status(200)
+      .json(
+        new ApiResponse(200, { provider: toSafeProvider(provider) }, "Connection verified")
+      );
   }
 );
 

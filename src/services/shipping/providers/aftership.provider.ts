@@ -85,8 +85,6 @@ export class AfterShipProvider implements IShippingProvider {
     };
 
     if (!res.ok) {
-      // TEMP DEBUG — remove once AfterShip Shipping auth is confirmed working.
-      console.log("[AfterShip DEBUG] status:", res.status, "body:", JSON.stringify(data), "keyPrefix:", this.credentials.apiKey.slice(0, 6));
       // Always surface as 502 (upstream failure), never relay AfterShip's own
       // status code verbatim — a provider-side 401/403 must not be mistaken
       // for our own admin auth failing, which would wrongly log the admin out.
@@ -95,6 +93,14 @@ export class AfterShipProvider implements IShippingProvider {
     }
 
     return data;
+  }
+
+  async testConnection(): Promise<void> {
+    if (isMockMode()) {
+      throw new ApiError(503, "Disable AfterShip mock mode before testing live credentials");
+    }
+
+    await this.request(SHIPPING_BASE_URL, "/couriers", { method: "GET" });
   }
 
   async createShipment(order: IOrder): Promise<StandardShipmentResult> {

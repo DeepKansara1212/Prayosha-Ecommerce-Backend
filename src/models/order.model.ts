@@ -61,6 +61,7 @@ export interface IOrder extends Document {
   carrier?: string;
   shippingStatus?: string;
   labelUrl?: string;
+  manifestUrl?: string;
   invoiceUrl?: string;
   shipmentCreatedAt?: Date;
   shippingMeta?: Record<string, unknown>;
@@ -166,6 +167,7 @@ const orderSchema = new Schema<IOrder>(
     carrier: { type: String },
     shippingStatus: { type: String },
     labelUrl: { type: String },
+    manifestUrl: { type: String },
     invoiceUrl: { type: String },
     shipmentCreatedAt: { type: Date },
     shippingMeta: { type: Schema.Types.Mixed, select: false },

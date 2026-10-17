@@ -95,16 +95,22 @@ export const generateInvoiceHandler = asyncHandler(
 
 export const handleShiprocketWebhook = asyncHandler(
   async (req: Request, res: Response): Promise<void> => {
-    try {
-      if (env.SHIPROCKET_WEBHOOK_TOKEN) {
-        const token = req.header("x-shiprocket-token");
-        if (token !== env.SHIPROCKET_WEBHOOK_TOKEN) {
-          console.warn("[ShipRocket Webhook] Invalid token");
-          res.status(200).json({ success: true });
-          return;
-        }
-      }
+    const providedToken = req.header("x-shiprocket-token");
+    if (
+      !env.SHIPROCKET_WEBHOOK_TOKEN ||
+      !providedToken ||
+      providedToken !== env.SHIPROCKET_WEBHOOK_TOKEN
+    ) {
+      console.warn(
+        env.SHIPROCKET_WEBHOOK_TOKEN
+          ? "[ShipRocket Webhook] Rejected: missing or invalid token"
+          : "[ShipRocket Webhook] Rejected: webhook token is not configured"
+      );
+      res.status(401).json({ success: false, message: "Unauthorized" });
+      return;
+    }
 
+    try {
       const payload = req.body as Record<string, unknown>;
       const shiprocketOrderId = String(
         payload.order_id ?? payload.sr_order_id ?? ""
@@ -173,25 +179,40 @@ export const handleShiprocketWebhook = asyncHandler(
 
 export const handleAftershipWebhook = asyncHandler(
   async (req: Request, res: Response): Promise<void> => {
+    const signature = req.header("aftership-hmac-sha256");
+    if (!env.AFTERSHIP_WEBHOOK_SECRET || !signature) {
+      console.warn(
+        env.AFTERSHIP_WEBHOOK_SECRET
+          ? "[AfterShip Webhook] Rejected: signature header is missing"
+          : "[AfterShip Webhook] Rejected: webhook secret is not configured"
+      );
+      res.status(401).json({ success: false, message: "Unauthorized" });
+      return;
+    }
+
+    if (!req.rawBody) {
+      console.warn("[AfterShip Webhook] Rejected: raw request body is unavailable");
+      res.status(401).json({ success: false, message: "Unauthorized" });
+      return;
+    }
+
+    const expected = crypto
+      .createHmac("sha256", env.AFTERSHIP_WEBHOOK_SECRET)
+      .update(req.rawBody)
+      .digest("base64");
+
+    const providedSignature = Buffer.from(signature);
+    const expectedSignature = Buffer.from(expected);
+    if (
+      providedSignature.length !== expectedSignature.length ||
+      !crypto.timingSafeEqual(providedSignature, expectedSignature)
+    ) {
+      console.warn("[AfterShip Webhook] Rejected: invalid HMAC signature");
+      res.status(401).json({ success: false, message: "Unauthorized" });
+      return;
+    }
+
     try {
-      if (env.AFTERSHIP_WEBHOOK_SECRET) {
-        const signature = req.header("aftership-hmac-sha256");
-        const rawBody = req.rawBody ?? Buffer.from(JSON.stringify(req.body));
-
-        if (signature) {
-          const expected = crypto
-            .createHmac("sha256", env.AFTERSHIP_WEBHOOK_SECRET)
-            .update(rawBody)
-            .digest("base64");
-
-          if (signature !== expected) {
-            console.warn("[AfterShip Webhook] Invalid HMAC signature");
-            res.status(200).json({ success: true });
-            return;
-          }
-        }
-      }
-
       const payload = req.body as {
         msg?: {
           id?: string;

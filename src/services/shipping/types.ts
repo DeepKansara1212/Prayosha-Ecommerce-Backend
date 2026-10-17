@@ -6,6 +6,7 @@ export interface StandardShipmentResult {
   carrier?: string;
   status: string;
   labelUrl?: string;
+  manifestUrl?: string;
   invoiceUrl?: string;
   estimatedDelivery?: string;
   // Opaque provider-specific bag, copied verbatim into order.shippingMeta by
@@ -36,4 +37,5 @@ export interface IShippingProvider {
   trackShipment(order: IOrder): Promise<StandardTrackingResult>;
   downloadLabel(order: IOrder): Promise<{ labelUrl: string }>;
   generateInvoice(order: IOrder): Promise<{ invoiceUrl: string }>;
+  testConnection(): Promise<void>;
 }

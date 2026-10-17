@@ -1,5 +1,5 @@
 import { ApiError } from "../../utils/ApiError";
-import { IOrder } from "../../models/order.model";
+import { IOrder, Order } from "../../models/order.model";
 import { ShippingProvider } from "../../models/shippingProvider.model";
 import { ShippingFactory } from "./ShippingFactory";
 import { StandardTrackingResult } from "./types";
@@ -40,8 +40,16 @@ export const ShippingService = {
     providerSlug: string,
     adminUserId?: string
   ): Promise<IOrder> {
-    if (order.shippingProvider) {
+    if (order.shippingProvider && order.shipmentId) {
       throw new ApiError(400, "This order already has a shipment — cancel it first to re-create");
+    }
+    if (order.shippingProvider && !order.shipmentId) {
+      throw new ApiError(
+        409,
+        `A previous ${order.shippingProvider} shipment attempt for this order did not finish saving ` +
+          `(status: "${order.shippingStatus ?? "unknown"}"). Check ${order.shippingProvider} for ` +
+          `order "${order.orderNumber}" before retrying, to avoid a duplicate shipment.`
+      );
     }
     if (!["confirmed", "processing"].includes(order.status)) {
       throw new ApiError(400, "Order must be in confirmed or processing status to ship");
@@ -52,44 +60,97 @@ export const ShippingService = {
 
     const provider = await ShippingFactory.getProvider(providerSlug);
 
+    const reservation = await Order.updateOne(
+      {
+        _id: order._id,
+        $or: [
+          { shippingProvider: { $exists: false } },
+          { shippingProvider: null },
+        ],
+      },
+      { $set: { shippingProvider: providerSlug, shippingStatus: "Creating" } }
+    );
+    if (reservation.modifiedCount !== 1) {
+      throw new ApiError(
+        409,
+        "Another shipment attempt has already started for this order. Refresh the order before retrying."
+      );
+    }
+
+    order.shippingProvider = providerSlug;
+    order.shippingStatus = "Creating";
+
+    let result: Awaited<ReturnType<typeof provider.createShipment>>;
     try {
-      const result = await provider.createShipment(order);
-
-      order.shippingProvider = providerSlug;
-      order.shipmentId = result.shipmentId;
-      order.awbNumber = result.trackingNumber;
-      order.carrier = result.carrier;
-      order.shippingStatus = result.status;
-      order.labelUrl = result.labelUrl;
-      order.invoiceUrl = result.invoiceUrl;
-      order.shipmentCreatedAt = new Date();
-      if (result.providerMeta) order.shippingMeta = result.providerMeta;
-      order.status = "processing";
-      order.statusHistory.push({
-        status: "processing",
-        note: `Shipment created via ${providerSlug}`,
-        timestamp: new Date(),
-      });
-
-      await order.save();
-      await touchLastSynced(providerSlug);
-      logShippingEvent("shipment_created", {
-        provider: providerSlug,
-        orderId: order._id.toString(),
-        adminUserId,
-        meta: { shipmentId: result.shipmentId },
-      });
-
-      return order;
+      result = await provider.createShipment(order);
     } catch (err) {
       logShippingEvent("shipment_failed", {
         provider: providerSlug,
         orderId: order._id.toString(),
         adminUserId,
-        meta: { error: err instanceof Error ? err.message : String(err) },
+        meta: {
+          stage: "provider_call",
+          error: err instanceof Error ? err.message : String(err),
+          reconciliationRequired: true,
+        },
       });
+      console.error(
+        `[Shipping] Provider call failed after reserving order ${order._id} with ${providerSlug}. ` +
+          `The provider may have created the shipment before the failure; reconcile it before retrying.`
+      );
       throw err;
     }
+
+    order.shipmentId = result.shipmentId;
+    order.awbNumber = result.trackingNumber;
+    order.carrier = result.carrier;
+    order.shippingStatus = result.status;
+    order.labelUrl = result.labelUrl;
+    order.manifestUrl = result.manifestUrl;
+    order.invoiceUrl = result.invoiceUrl;
+    order.shipmentCreatedAt = new Date();
+    if (result.providerMeta) order.shippingMeta = result.providerMeta;
+    order.status = "processing";
+    order.statusHistory.push({
+      status: "processing",
+      note: `Shipment created via ${providerSlug}`,
+      timestamp: new Date(),
+    });
+
+    try {
+      await order.save();
+    } catch (err) {
+      console.error(
+        `[Shipping] Provider shipment was created but the local save failed. ` +
+          `Order ${order._id}, provider ${providerSlug}, shipmentId ${result.shipmentId}, ` +
+          `trackingNumber ${result.trackingNumber ?? "n/a"}. Reconciliation is required.`
+      );
+      logShippingEvent("shipment_failed", {
+        provider: providerSlug,
+        orderId: order._id.toString(),
+        adminUserId,
+        meta: {
+          stage: "post_provider_save",
+          shipmentId: result.shipmentId,
+          error: err instanceof Error ? err.message : String(err),
+        },
+      });
+      throw new ApiError(
+        502,
+        `Shipment was created with ${providerSlug} (ID: ${result.shipmentId}) but failed to save locally. ` +
+          `Do not retry; reconcile this order using the provider shipment ID.`
+      );
+    }
+
+    await touchLastSynced(providerSlug);
+    logShippingEvent("shipment_created", {
+      provider: providerSlug,
+      orderId: order._id.toString(),
+      adminUserId,
+      meta: { shipmentId: result.shipmentId },
+    });
+
+    return order;
   },
 
   async cancelShipment(order: IOrder, adminUserId?: string): Promise<IOrder> {
@@ -126,7 +187,13 @@ export const ShippingService = {
     order.awbNumber = undefined;
     order.carrier = undefined;
     order.shippingStatus = undefined;
+    order.labelUrl = undefined;
+    order.manifestUrl = undefined;
+    order.invoiceUrl = undefined;
+    order.shipmentCreatedAt = undefined;
     order.shippingMeta = undefined;
+    order.trackingUrl = undefined;
+    order.trackingCheckpoints = undefined;
 
     await order.save();
     logShippingEvent("shipment_cancelled", {

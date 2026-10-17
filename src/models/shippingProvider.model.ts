@@ -8,6 +8,8 @@ export interface IShippingProvider extends Document {
   logo?: string;
   isActive: boolean;
   isDefault: boolean;
+  isVerified: boolean;
+  lastVerifiedAt?: Date;
   credentialsEncrypted?: string;
   lastSyncedAt?: Date;
   createdAt: Date;
@@ -27,6 +29,8 @@ const shippingProviderSchema = new Schema<IShippingProvider, ShippingProviderMod
     logo: { type: String },
     isActive: { type: Boolean, default: false },
     isDefault: { type: Boolean, default: false },
+    isVerified: { type: Boolean, default: false },
+    lastVerifiedAt: { type: Date },
     credentialsEncrypted: { type: String, select: false },
     lastSyncedAt: { type: Date },
   },

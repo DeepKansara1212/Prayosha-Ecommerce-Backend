@@ -83,6 +83,10 @@ export class ShiprocketProvider implements IShippingProvider {
     return this.fetchToken();
   }
 
+  async testConnection(): Promise<void> {
+    await this.fetchToken();
+  }
+
   private async request<T>(
     path: string,
     options: RequestInit = {},
@@ -271,13 +275,124 @@ export class ShiprocketProvider implements IShippingProvider {
     const shipmentId = String(data.shipment_id ?? "");
 
     if (!shiprocketOrderId || !shipmentId) {
-      throw new ApiError(502, data.message || "ShipRocket did not return order IDs");
+      throw new ApiError(
+        502,
+        `ShipRocket may have created order "${order.orderNumber}" but did not return both order and shipment IDs. ` +
+          `${data.message || "Check ShipRocket before retrying."}`
+      );
     }
+
+    const numericShipmentId = Number(shipmentId);
+    if (!Number.isSafeInteger(numericShipmentId) || numericShipmentId <= 0) {
+      throw new ApiError(
+        502,
+        `ShipRocket returned an invalid shipment ID for order ${shiprocketOrderId}. ` +
+          `Check ShipRocket before retrying.`
+      );
+    }
+
+    const withShipmentContext = async <T>(
+      step: string,
+      operation: () => Promise<T>
+    ): Promise<T> => {
+      try {
+        return await operation();
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        throw new ApiError(
+          502,
+          `ShipRocket order ${shiprocketOrderId} (shipment ${shipmentId}) was created, but ${step} failed: ` +
+            `${reason}. Check ShipRocket before retrying to avoid a duplicate shipment.`
+        );
+      }
+    };
+
+    const awbData = await withShipmentContext("AWB/courier assignment", async () => {
+      const result = await this.request<{
+        awb_assign_status?: number | string;
+        response?: {
+          data?: {
+            awb_code?: string;
+            courier_company_id?: number;
+            courier_name?: string;
+          };
+        };
+        awb_code?: string;
+        courier_company_id?: number;
+        courier_name?: string;
+        message?: string;
+      }>("/courier/assign/awb", {
+        method: "POST",
+        // Omitting courier_id uses the default courier configured in ShipRocket.
+        body: JSON.stringify({ shipment_id: numericShipmentId }),
+      });
+
+      const assigned = result.response?.data ?? result;
+      if (!assigned.awb_code) {
+        throw new ApiError(
+          502,
+          result.message || "ShipRocket did not return an AWB code"
+        );
+      }
+      return assigned;
+    });
+
+    await withShipmentContext("pickup request", async () => {
+      const result = await this.request<{
+        pickup_status?: number | string | boolean;
+        message?: string;
+      }>("/courier/generate/pickup", {
+        method: "POST",
+        body: JSON.stringify({ shipment_id: [numericShipmentId] }),
+      });
+
+      if (
+        result.pickup_status !== 1 &&
+        result.pickup_status !== "1" &&
+        result.pickup_status !== true
+      ) {
+        throw new ApiError(
+          502,
+          result.message || "ShipRocket did not confirm the pickup request"
+        );
+      }
+    });
+
+    const manifestUrl = await withShipmentContext(
+      "manifest generation",
+      async () => {
+        const result = await this.request<{
+          status?: number | string;
+          manifest_url?: string;
+          message?: string;
+        }>("/manifests/generate", {
+          method: "POST",
+          body: JSON.stringify({ shipment_id: [numericShipmentId] }),
+        });
+
+        if (
+          (result.status !== 1 && result.status !== "1") ||
+          !result.manifest_url
+        ) {
+          throw new ApiError(
+            502,
+            result.message || "ShipRocket did not return a manifest URL"
+          );
+        }
+        return result.manifest_url;
+      }
+    );
 
     return {
       shipmentId,
-      status: "Order Created",
-      providerMeta: { shiprocketOrderId },
+      trackingNumber: awbData.awb_code,
+      carrier: awbData.courier_name,
+      status: "Pickup Scheduled",
+      manifestUrl,
+      providerMeta: {
+        shiprocketOrderId,
+        courierCompanyId: awbData.courier_company_id,
+      },
     };
   }
 
