@@ -5,7 +5,7 @@ export interface IReward extends Document {
   order: Types.ObjectId;
   pointsEarned: number;
   orderTotal: number;
-  type: "earned";
+  type: "earned" | "redeemed";
   createdAt: Date;
   updatedAt: Date;
 }
@@ -16,7 +16,7 @@ const rewardSchema = new Schema<IReward>(
     order: { type: Schema.Types.ObjectId, ref: "Order", required: true },
     pointsEarned: { type: Number, required: true, min: 0 },
     orderTotal: { type: Number, required: true },
-    type: { type: String, enum: ["earned"], default: "earned" },
+    type: { type: String, enum: ["earned", "redeemed"], default: "earned" },
   },
   { timestamps: true }
 );

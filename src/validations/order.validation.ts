@@ -4,6 +4,7 @@ export const createOrderSchema = z.object({
   addressId: z.string().min(1, "addressId is required"),
   couponCode: z.string().optional(),
   notes: z.string().max(500).optional(),
+  redeemPoints: z.number().int().min(0).optional(),
 });
 
 export const razorpayVerifySchema = z.object({

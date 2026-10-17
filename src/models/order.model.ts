@@ -69,6 +69,8 @@ export interface IOrder extends Document {
   statusHistory: IStatusHistoryEntry[];
   notes?: string;
   pointsEarned: number;
+  pointsRedeemed: number;
+  pointsDiscount: number;
   hasFreeGift: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -172,6 +174,8 @@ const orderSchema = new Schema<IOrder>(
     statusHistory: { type: [statusHistorySchema], default: [] },
     notes: { type: String },
     pointsEarned: { type: Number, default: 0 },
+    pointsRedeemed: { type: Number, default: 0 },
+    pointsDiscount: { type: Number, default: 0 },
     hasFreeGift: { type: Boolean, default: false },
   },
   { timestamps: true }

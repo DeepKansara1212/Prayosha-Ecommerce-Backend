@@ -12,7 +12,7 @@ import { User } from "../models/user.model";
 import { Coupon, ICoupon } from "../models/coupon.model";
 import { Reward } from "../models/reward.model";
 import { Settings } from "../models/settings.model";
-import { calculatePoints } from "../utils/rewardUtils";
+import { calculatePoints, MIN_REDEMPTION_POINTS } from "../utils/rewardUtils";
 import { env } from "../config/env";
 import { paginate } from "../utils/pagination";
 import { sendOrderConfirmationEmail } from "../utils/email";
@@ -62,6 +62,44 @@ async function resolveCoupon(
       : Math.round((subtotal * coupon.discountValue) / 100);
 
   return { coupon, discountAmount };
+}
+
+async function reserveRewardPoints(
+  userId: Types.ObjectId,
+  requestedPoints: number,
+  total: number
+): Promise<number> {
+  if (!Number.isSafeInteger(requestedPoints) || requestedPoints < 0)
+    throw new ApiError(400, "Redeemed points must be a non-negative whole number");
+  if (requestedPoints > 0 && requestedPoints < MIN_REDEMPTION_POINTS)
+    throw new ApiError(400, `At least ${MIN_REDEMPTION_POINTS} points are required to redeem`);
+
+  const maxRedeemablePoints = Math.floor(total * 10 + 1e-8);
+  if (requestedPoints > maxRedeemablePoints)
+    throw new ApiError(400, "Redeemed points exceed the order total");
+  if (requestedPoints === 0) return 0;
+
+  const user = await User.findOneAndUpdate(
+    { _id: userId, rewardPoints: { $gte: requestedPoints } },
+    { $inc: { rewardPoints: -requestedPoints } },
+    { new: true }
+  );
+  if (!user) throw new ApiError(400, "Insufficient reward points");
+
+  return Math.round(requestedPoints * 10) / 100;
+}
+
+async function releaseAttemptPoints(attemptId: Types.ObjectId): Promise<void> {
+  const failedAttempt = await PaymentAttempt.findOneAndUpdate(
+    { _id: attemptId, status: "pending" },
+    { $set: { status: "failed" } },
+    { new: true }
+  );
+  if (failedAttempt && failedAttempt.pointsRedeemed > 0) {
+    await User.findByIdAndUpdate(failedAttempt.user, {
+      $inc: { rewardPoints: failedAttempt.pointsRedeemed },
+    });
+  }
 }
 
 // ─── Shared cart-validation logic (used by COD and Razorpay create) ───────────
@@ -132,6 +170,15 @@ async function applyRewardsAndGift(
   const pointsEarned = calculatePoints(order.total);
 
   await User.findByIdAndUpdate(userId, { $inc: { rewardPoints: pointsEarned } });
+  if (order.pointsRedeemed > 0) {
+    await Reward.create({
+      user: userId,
+      order: order._id,
+      pointsEarned: order.pointsRedeemed,
+      orderTotal: order.total,
+      type: "redeemed",
+    });
+  }
   await Reward.create({
     user: userId,
     order: order._id,
@@ -244,6 +291,8 @@ async function completeRazorpayAttempt(
       shippingCharge: attempt.shippingCharge,
       tax: attempt.tax,
       total: attempt.total,
+      pointsRedeemed: attempt.pointsRedeemed,
+      pointsDiscount: attempt.pointsDiscount,
       paymentMethod: "razorpay",
       paymentStatus: "pending",
       razorpayOrderId: attempt.razorpayOrderId,
@@ -301,108 +350,16 @@ export const validateCoupon = asyncHandler(
   }
 );
 
-// ─── POST /api/v1/orders/cod ──────────────────────────────────────────────────
-
-export const createOrderCOD = asyncHandler(
-  async (req: Request, res: Response): Promise<void> => {
-    const userId = req.user!._id as Types.ObjectId;
-    const { addressId, couponCode, notes } = req.body as {
-      addressId: string;
-      couponCode?: string;
-      notes?: string;
-    };
-
-    if (!addressId) throw new ApiError(400, "addressId is required");
-
-    const { cart, user, address, orderItems, subtotal } =
-      await buildOrderPayload(userId, addressId);
-
-    // Coupon
-    let discount = 0;
-    let appliedCoupon: ICoupon | null = null;
-    if (couponCode) {
-      const result = await resolveCoupon(couponCode, subtotal);
-      discount = result.discountAmount;
-      appliedCoupon = result.coupon;
-    }
-
-    const shippingCharge = subtotal - discount >= 999 ? 0 : 60;
-    const tax = 0;
-    const total = subtotal - discount + shippingCharge + tax;
-
-    const orderNumber = await generateOrderNumber();
-
-    const order = await Order.create({
-      orderNumber,
-      user: userId,
-      items: orderItems,
-      shippingAddress: {
-        fullName: address.fullName,
-        phone: address.phone,
-        line1: address.line1,
-        line2: address.line2,
-        city: address.city,
-        state: address.state,
-        pincode: address.pincode,
-      },
-      subtotal,
-      discount,
-      couponCode: appliedCoupon?.code,
-      shippingCharge,
-      tax,
-      total,
-      paymentMethod: "cod",
-      paymentStatus: "pending",
-      status: "placed",
-      statusHistory: [
-        { status: "placed", note: "Order placed via COD", timestamp: new Date() },
-      ],
-      notes,
-    });
-
-    // Decrement stock
-    for (const item of orderItems) {
-      await Product.findByIdAndUpdate(item.product, {
-        $inc: { stock: -item.quantity },
-      });
-    }
-
-    // Increment coupon usage
-    if (appliedCoupon) {
-      await Coupon.findByIdAndUpdate(appliedCoupon._id, {
-        $inc: { usedCount: 1 },
-      });
-    }
-
-    // Clear cart
-    cart.items = [] as unknown as typeof cart.items;
-    cart.couponApplied = undefined;
-    await cart.save();
-
-    // Fire-and-forget — email.ts catches and logs failures internally
-    void sendOrderConfirmationEmail(order, user);
-
-    const { pointsEarned, newPointsBalance } = await applyRewardsAndGift(order, userId);
-
-    res.status(201).json(
-      new ApiResponse(
-        201,
-        { order, pointsEarned, newPointsBalance },
-        "Order placed successfully"
-      )
-    );
-  }
-);
-
 // ─── POST /api/v1/orders/razorpay/create ─────────────────────────────────────
 
 export const createRazorpayOrder = asyncHandler(
   async (req: Request, res: Response): Promise<void> => {
     const userId = req.user!._id as Types.ObjectId;
-    const { addressId, couponCode, notes } = req.body as {
+    const { addressId, couponCode, notes, redeemPoints = 0 } = req.body as {
       addressId: string;
       couponCode?: string;
       notes?: string;
+      redeemPoints?: number;
     };
 
     if (!addressId) throw new ApiError(400, "addressId is required");
@@ -422,38 +379,49 @@ export const createRazorpayOrder = asyncHandler(
 
     const shippingCharge = subtotal - discount >= 999 ? 0 : 60;
     const tax = 0;
-    const total = subtotal - discount + shippingCharge + tax;
-
+    const orderTotal = subtotal - discount + shippingCharge + tax;
     const rzp = getRazorpay();
+    const pointsDiscount = await reserveRewardPoints(userId, redeemPoints, orderTotal);
+    const total = orderTotal - pointsDiscount;
 
-    const rzpOrder = (await rzp.orders.create({
-      amount: Math.round(total * 100), // paise
-      currency: "INR",
-      receipt: `checkout_${new Types.ObjectId().toString()}`,
-    })) as any;
+    let rzpOrder: { id: string; amount: number; currency: string };
+    try {
+      rzpOrder = (await rzp.orders.create({
+        amount: Math.round(total * 100), // paise
+        currency: "INR",
+        receipt: `checkout_${new Types.ObjectId().toString()}`,
+      })) as { id: string; amount: number; currency: string };
 
-    await PaymentAttempt.create({
-      razorpayOrderId: rzpOrder.id,
-      user: userId,
-      items: orderItems,
-      shippingAddress: {
-        fullName: address.fullName,
-        phone: address.phone,
-        line1: address.line1,
-        line2: address.line2,
-        city: address.city,
-        state: address.state,
-        pincode: address.pincode,
-      },
-      subtotal,
-      discount,
-      couponCode: appliedCoupon?.code,
-      shippingCharge,
-      tax,
-      total,
-      status: "pending",
-      notes,
-    });
+      await PaymentAttempt.create({
+        razorpayOrderId: rzpOrder.id,
+        user: userId,
+        items: orderItems,
+        shippingAddress: {
+          fullName: address.fullName,
+          phone: address.phone,
+          line1: address.line1,
+          line2: address.line2,
+          city: address.city,
+          state: address.state,
+          pincode: address.pincode,
+        },
+        subtotal,
+        discount,
+        couponCode: appliedCoupon?.code,
+        shippingCharge,
+        tax,
+        total,
+        pointsRedeemed: redeemPoints,
+        pointsDiscount,
+        status: "pending",
+        notes,
+      });
+    } catch (error) {
+      if (redeemPoints > 0) {
+        await User.findByIdAndUpdate(userId, { $inc: { rewardPoints: redeemPoints } });
+      }
+      throw error;
+    }
 
     res.status(201).json(
       new ApiResponse(
@@ -515,8 +483,7 @@ export const verifyRazorpayPayment = asyncHandler(
         await order.save();
       }
       if (attempt) {
-        attempt.status = "failed";
-        await attempt.save();
+        await releaseAttemptPoints(attempt._id as Types.ObjectId);
       }
       throw new ApiError(400, "Payment signature is invalid");
     }
@@ -580,8 +547,7 @@ export const failRazorpayPayment = asyncHandler(
       await legacyOrder.save();
     }
     if (attempt?.status === "pending") {
-      attempt.status = "failed";
-      await attempt.save();
+      await releaseAttemptPoints(attempt._id as Types.ObjectId);
     }
 
     res.status(200).json(
@@ -660,6 +626,17 @@ export const handleRazorpayWebhook = asyncHandler(
             );
           }
         }
+      }
+    }
+    if (event === "payment.failed") {
+      const payment = req.body?.payload?.payment?.entity as
+        | { order_id?: string }
+        | undefined;
+      if (payment?.order_id) {
+        const attempt = await PaymentAttempt.findOne({
+          razorpayOrderId: payment.order_id,
+        });
+        if (attempt) await releaseAttemptPoints(attempt._id as Types.ObjectId);
       }
     }
 

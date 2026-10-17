@@ -1,6 +1,5 @@
 import { Router } from "express";
 import {
-  createOrderCOD,
   createRazorpayOrder,
   verifyRazorpayPayment,
   failRazorpayPayment,
@@ -25,7 +24,6 @@ export const orderRouter = Router();
 
 orderRouter.use(verifyJWT);
 
-orderRouter.post("/cod", validate(createOrderSchema), createOrderCOD);
 orderRouter.post("/razorpay/create", validate(createOrderSchema), createRazorpayOrder);
 orderRouter.post("/razorpay/verify", validate(razorpayVerifySchema), verifyRazorpayPayment);
 orderRouter.post("/razorpay/fail", validate(razorpayFailureSchema), failRazorpayPayment);
