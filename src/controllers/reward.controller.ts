@@ -38,7 +38,7 @@ export const getRewardsHistory = asyncHandler(
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
-        .populate("order", "orderNumber total createdAt"),
+        .populate("order", "items.name items.quantity total createdAt"),
       Reward.countDocuments(filter),
       User.findById(userId).select("rewardPoints"),
     ]);
