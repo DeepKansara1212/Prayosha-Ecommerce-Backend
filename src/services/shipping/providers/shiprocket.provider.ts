@@ -63,10 +63,20 @@ export class ShiprocketProvider implements IShippingProvider {
     const data = (await res.json()) as { token?: string; message?: string };
 
     if (!res.ok || !data.token) {
+      // DIAGNOSTIC: log ShipRocket's real status code and full response body
+      // so we can see exactly what it rejected, instead of only the message
+      // text (which can be generic/misleading on its own).
+      console.error(
+        `[ShipRocket] auth/login failed — status ${res.status} ${res.statusText}. ` +
+          `Response body: ${JSON.stringify(data)}`,
+      );
       // Always 502 (upstream failure) — never relay ShipRocket's own status
       // code, since a 401/403 here would otherwise be mistaken by the Admin
       // client for our own auth failing and wrongly log the admin out.
-      throw new ApiError(502, data.message || "Failed to authenticate with ShipRocket");
+      throw new ApiError(
+        502,
+        data.message || "Failed to authenticate with ShipRocket",
+      );
     }
 
     tokenCache.set(credentialsKey(this.credentials), {
@@ -90,7 +100,7 @@ export class ShiprocketProvider implements IShippingProvider {
   private async request<T>(
     path: string,
     options: RequestInit = {},
-    retryOn401 = true
+    retryOn401 = true,
   ): Promise<T> {
     const token = await this.getToken();
     const res = await fetch(`${BASE_URL}${path}`, {
@@ -150,16 +160,30 @@ export class ShiprocketProvider implements IShippingProvider {
     };
     for (const item of order.items) {
       const product = products.find(
-        (p) => p._id.toString() === item.product.toString()
+        (p) => p._id.toString() === item.product.toString(),
       );
       const categoryShipping = (
         product?.category as unknown as
-          | { shipping?: { weight?: string; length?: string; breadth?: string; height?: string } }
+          | {
+              shipping?: {
+                weight?: string;
+                length?: string;
+                breadth?: string;
+                height?: string;
+              };
+            }
           | undefined
       )?.shipping;
       const subCategoryShipping = (
         product?.subCategory as unknown as
-          | { shipping?: { weight?: string; length?: string; breadth?: string; height?: string } }
+          | {
+              shipping?: {
+                weight?: string;
+                length?: string;
+                breadth?: string;
+                height?: string;
+              };
+            }
           | undefined
       )?.shipping;
       const inheritedShipping = product?.useCategoryShipping
@@ -178,7 +202,7 @@ export class ShiprocketProvider implements IShippingProvider {
           : undefined;
       if (totalShippingWeight && itemWeight === undefined) {
         throw new Error(
-          `Invalid total shipping weight for product "${item.name}". Use a value such as 250 g or 1.2 kg.`
+          `Invalid total shipping weight for product "${item.name}". Use a value such as 250 g or 1.2 kg.`,
         );
       }
       totalWeight += (itemWeight ?? defaultWeight) * item.quantity;
@@ -191,14 +215,16 @@ export class ShiprocketProvider implements IShippingProvider {
               ? defaultLength
               : key === "breadth"
                 ? defaultBreadth
-                : defaultHeight
+                : defaultHeight,
           );
           continue;
         }
-        const match = String(rawDimension).trim().match(/^(\d+(?:\.\d+)?)\s*(?:cm)?$/i);
+        const match = String(rawDimension)
+          .trim()
+          .match(/^(\d+(?:\.\d+)?)\s*(?:cm)?$/i);
         if (!match || Number(match[1]) <= 0) {
           throw new Error(
-            `Invalid shipping ${key} for product "${item.name}". Enter a positive measurement in centimeters.`
+            `Invalid shipping ${key} for product "${item.name}". Enter a positive measurement in centimeters.`,
           );
         }
         dimensions[key].push(Number(match[1]));
@@ -207,9 +233,15 @@ export class ShiprocketProvider implements IShippingProvider {
 
     return {
       weight: Math.max(totalWeight, 0.1),
-      length: dimensions.length.length ? Math.max(...dimensions.length) : defaultLength,
-      breadth: dimensions.breadth.length ? Math.max(...dimensions.breadth) : defaultBreadth,
-      height: dimensions.height.length ? Math.max(...dimensions.height) : defaultHeight,
+      length: dimensions.length.length
+        ? Math.max(...dimensions.length)
+        : defaultLength,
+      breadth: dimensions.breadth.length
+        ? Math.max(...dimensions.breadth)
+        : defaultBreadth,
+      height: dimensions.height.length
+        ? Math.max(...dimensions.height)
+        : defaultHeight,
     };
   }
 
@@ -278,7 +310,7 @@ export class ShiprocketProvider implements IShippingProvider {
       throw new ApiError(
         502,
         `ShipRocket may have created order "${order.orderNumber}" but did not return both order and shipment IDs. ` +
-          `${data.message || "Check ShipRocket before retrying."}`
+          `${data.message || "Check ShipRocket before retrying."}`,
       );
     }
 
@@ -287,13 +319,13 @@ export class ShiprocketProvider implements IShippingProvider {
       throw new ApiError(
         502,
         `ShipRocket returned an invalid shipment ID for order ${shiprocketOrderId}. ` +
-          `Check ShipRocket before retrying.`
+          `Check ShipRocket before retrying.`,
       );
     }
 
     const withShipmentContext = async <T>(
       step: string,
-      operation: () => Promise<T>
+      operation: () => Promise<T>,
     ): Promise<T> => {
       try {
         return await operation();
@@ -302,40 +334,43 @@ export class ShiprocketProvider implements IShippingProvider {
         throw new ApiError(
           502,
           `ShipRocket order ${shiprocketOrderId} (shipment ${shipmentId}) was created, but ${step} failed: ` +
-            `${reason}. Check ShipRocket before retrying to avoid a duplicate shipment.`
+            `${reason}. Check ShipRocket before retrying to avoid a duplicate shipment.`,
         );
       }
     };
 
-    const awbData = await withShipmentContext("AWB/courier assignment", async () => {
-      const result = await this.request<{
-        awb_assign_status?: number | string;
-        response?: {
-          data?: {
-            awb_code?: string;
-            courier_company_id?: number;
-            courier_name?: string;
+    const awbData = await withShipmentContext(
+      "AWB/courier assignment",
+      async () => {
+        const result = await this.request<{
+          awb_assign_status?: number | string;
+          response?: {
+            data?: {
+              awb_code?: string;
+              courier_company_id?: number;
+              courier_name?: string;
+            };
           };
-        };
-        awb_code?: string;
-        courier_company_id?: number;
-        courier_name?: string;
-        message?: string;
-      }>("/courier/assign/awb", {
-        method: "POST",
-        // Omitting courier_id uses the default courier configured in ShipRocket.
-        body: JSON.stringify({ shipment_id: numericShipmentId }),
-      });
+          awb_code?: string;
+          courier_company_id?: number;
+          courier_name?: string;
+          message?: string;
+        }>("/courier/assign/awb", {
+          method: "POST",
+          // Omitting courier_id uses the default courier configured in ShipRocket.
+          body: JSON.stringify({ shipment_id: numericShipmentId }),
+        });
 
-      const assigned = result.response?.data ?? result;
-      if (!assigned.awb_code) {
-        throw new ApiError(
-          502,
-          result.message || "ShipRocket did not return an AWB code"
-        );
-      }
-      return assigned;
-    });
+        const assigned = result.response?.data ?? result;
+        if (!assigned.awb_code) {
+          throw new ApiError(
+            502,
+            result.message || "ShipRocket did not return an AWB code",
+          );
+        }
+        return assigned;
+      },
+    );
 
     await withShipmentContext("pickup request", async () => {
       const result = await this.request<{
@@ -353,7 +388,7 @@ export class ShiprocketProvider implements IShippingProvider {
       ) {
         throw new ApiError(
           502,
-          result.message || "ShipRocket did not confirm the pickup request"
+          result.message || "ShipRocket did not confirm the pickup request",
         );
       }
     });
@@ -376,11 +411,11 @@ export class ShiprocketProvider implements IShippingProvider {
         ) {
           throw new ApiError(
             502,
-            result.message || "ShipRocket did not return a manifest URL"
+            result.message || "ShipRocket did not return a manifest URL",
           );
         }
         return result.manifest_url;
-      }
+      },
     );
 
     return {
@@ -397,10 +432,14 @@ export class ShiprocketProvider implements IShippingProvider {
   }
 
   async cancelShipment(order: IOrder): Promise<void> {
-    const shiprocketOrderId = (order.shippingMeta as { shiprocketOrderId?: string } | undefined)
-      ?.shiprocketOrderId;
+    const shiprocketOrderId = (
+      order.shippingMeta as { shiprocketOrderId?: string } | undefined
+    )?.shiprocketOrderId;
     if (!shiprocketOrderId) {
-      throw new ApiError(400, "No ShipRocket order reference found on this order");
+      throw new ApiError(
+        400,
+        "No ShipRocket order reference found on this order",
+      );
     }
 
     await this.request("/orders/cancel", {
@@ -461,17 +500,24 @@ export class ShiprocketProvider implements IShippingProvider {
 
     const labelUrl = data.label_url || data.response?.label_url;
     if (!labelUrl) {
-      throw new ApiError(502, data.message || "ShipRocket did not return a label URL");
+      throw new ApiError(
+        502,
+        data.message || "ShipRocket did not return a label URL",
+      );
     }
 
     return { labelUrl };
   }
 
   async generateInvoice(order: IOrder): Promise<{ invoiceUrl: string }> {
-    const shiprocketOrderId = (order.shippingMeta as { shiprocketOrderId?: string } | undefined)
-      ?.shiprocketOrderId;
+    const shiprocketOrderId = (
+      order.shippingMeta as { shiprocketOrderId?: string } | undefined
+    )?.shiprocketOrderId;
     if (!shiprocketOrderId) {
-      throw new ApiError(400, "No ShipRocket order reference found on this order");
+      throw new ApiError(
+        400,
+        "No ShipRocket order reference found on this order",
+      );
     }
 
     const data = await this.request<{
@@ -483,7 +529,10 @@ export class ShiprocketProvider implements IShippingProvider {
     });
 
     if (!data.invoice_url) {
-      throw new ApiError(502, data.message || "ShipRocket did not return an invoice URL");
+      throw new ApiError(
+        502,
+        data.message || "ShipRocket did not return an invoice URL",
+      );
     }
 
     return { invoiceUrl: data.invoice_url };
@@ -491,7 +540,7 @@ export class ShiprocketProvider implements IShippingProvider {
 }
 
 export function mapShiprocketStatusToOrderStatus(
-  shiprocketStatus: string
+  shiprocketStatus: string,
 ): IOrder["status"] | null {
   const normalized = shiprocketStatus.toUpperCase().trim();
 
