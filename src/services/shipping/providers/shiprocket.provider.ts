@@ -435,6 +435,15 @@ export class ShiprocketProvider implements IShippingProvider {
     const shiprocketOrderId = (
       order.shippingMeta as { shiprocketOrderId?: string } | undefined
     )?.shiprocketOrderId;
+
+    // A shipment reservation can exist before ShipRocket ever returns a real
+    // shipment/order reference. In that case there is nothing to cancel on the
+    // provider side, so treat the cancellation as a local cleanup instead of
+    // surfacing a hard 400/502 to the admin UI.
+    if (!shiprocketOrderId && !order.shipmentId) {
+      return;
+    }
+
     if (!shiprocketOrderId) {
       throw new ApiError(
         400,
