@@ -373,23 +373,33 @@ export class ShiprocketProvider implements IShippingProvider {
     );
 
     await withShipmentContext("pickup request", async () => {
-      const result = await this.request<{
-        pickup_status?: number | string | boolean;
-        message?: string;
-      }>("/courier/generate/pickup", {
-        method: "POST",
-        body: JSON.stringify({ shipment_id: [numericShipmentId] }),
-      });
+      try {
+        const result = await this.request<{
+          pickup_status?: number | string | boolean;
+          message?: string;
+        }>("/courier/generate/pickup", {
+          method: "POST",
+          body: JSON.stringify({ shipment_id: [numericShipmentId] }),
+        });
 
-      if (
-        result.pickup_status !== 1 &&
-        result.pickup_status !== "1" &&
-        result.pickup_status !== true
-      ) {
-        throw new ApiError(
-          502,
-          result.message || "ShipRocket did not confirm the pickup request",
-        );
+        if (
+          result.pickup_status !== 1 &&
+          result.pickup_status !== "1" &&
+          result.pickup_status !== true
+        ) {
+          throw new ApiError(
+            502,
+            result.message || "ShipRocket did not confirm the pickup request",
+          );
+        }
+      } catch (err) {
+        // ShipRocket rejects this call when a pickup has already been queued
+        // for this shipment. In that case, the requested pickup is scheduled.
+        const message = err instanceof Error ? err.message : String(err);
+        if (/already in pickup queue/i.test(message)) {
+          return;
+        }
+        throw err;
       }
     });
 
