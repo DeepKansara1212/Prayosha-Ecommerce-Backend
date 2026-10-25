@@ -21,6 +21,9 @@ import { IOrder, ORDER_VISIBILITY_FILTER } from "../models/order.model";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+const FREE_SHIPPING_THRESHOLD = 999;
+const SHIPPING_CHARGE = 149;
+
 function getRazorpay(): Razorpay {
   if (!env.RAZORPAY_KEY_ID || !env.RAZORPAY_KEY_SECRET) {
     throw new ApiError(503, "Razorpay is not configured on this server");
@@ -377,7 +380,8 @@ export const createRazorpayOrder = asyncHandler(
       appliedCoupon = result.coupon;
     }
 
-    const shippingCharge = subtotal - discount >= 999 ? 0 : 60;
+    const shippingCharge =
+      subtotal - discount >= FREE_SHIPPING_THRESHOLD ? 0 : SHIPPING_CHARGE;
     const tax = 0;
     const orderTotal = subtotal - discount + shippingCharge + tax;
     const rzp = getRazorpay();
