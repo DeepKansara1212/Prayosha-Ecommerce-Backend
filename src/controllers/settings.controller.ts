@@ -15,6 +15,7 @@ export const getPublicSettings = asyncHandler(
         200,
         {
           freeGiftEnabled: settings.freeGiftEnabled,
+          freeShippingEnabled: settings.freeShippingEnabled,
           whatsappNumber: settings.whatsappNumber,
           whatsappDefaultMessage: settings.whatsappDefaultMessage,
         },

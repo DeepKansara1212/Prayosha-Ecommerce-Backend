@@ -18,11 +18,9 @@ import { paginate } from "../utils/pagination";
 import { sendOrderConfirmationEmail } from "../utils/email";
 import { FilterQuery, Types } from "mongoose";
 import { IOrder, ORDER_VISIBILITY_FILTER } from "../models/order.model";
+import { ShippingFactory } from "../services/shipping/ShippingFactory";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-const FREE_SHIPPING_THRESHOLD = 999;
-const SHIPPING_CHARGE = 149;
 
 function getRazorpay(): Razorpay {
   if (!env.RAZORPAY_KEY_ID || !env.RAZORPAY_KEY_SECRET) {
@@ -164,6 +162,36 @@ async function buildOrderPayload(userId: Types.ObjectId, addressId: string) {
   return { cart, user, address, orderItems, subtotal };
 }
 
+async function calculateCheckoutShipping(
+  items: Array<{
+    product: Types.ObjectId;
+    name: string;
+    quantity: number;
+  }>,
+  deliveryPostcode: string,
+  declaredValue: number,
+): Promise<{ shippingCharge: number; shippingMeta?: Record<string, unknown> }> {
+  const settings = await Settings.getSettings();
+  if (settings.freeShippingEnabled) return { shippingCharge: 0 };
+
+  const provider = await ShippingFactory.getProvider("shiprocket");
+  if (!provider.calculateShippingRate) {
+    throw new ApiError(503, "Shiprocket live rate calculation is not available");
+  }
+
+  const rate = await provider.calculateShippingRate(
+    items,
+    deliveryPostcode,
+    "prepaid",
+    declaredValue,
+  );
+
+  return {
+    shippingCharge: rate.charge,
+    shippingMeta: { quotedCourierCompanyId: rate.courierCompanyId },
+  };
+}
+
 // ─── Shared: award points + determine free gift after successful order ────────
 
 async function applyRewardsAndGift(
@@ -292,6 +320,7 @@ async function completeRazorpayAttempt(
       discount: attempt.discount,
       couponCode: attempt.couponCode,
       shippingCharge: attempt.shippingCharge,
+      shippingMeta: attempt.shippingMeta,
       tax: attempt.tax,
       total: attempt.total,
       pointsRedeemed: attempt.pointsRedeemed,
@@ -353,16 +382,58 @@ export const validateCoupon = asyncHandler(
   }
 );
 
+// ─── POST /api/v1/orders/shipping-quote ──────────────────────────────────────
+
+export const getShippingQuote = asyncHandler(
+  async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user!._id as Types.ObjectId;
+    const { addressId, couponCode } = req.body as {
+      addressId: string;
+      couponCode?: string;
+    };
+    const { address, orderItems, subtotal } = await buildOrderPayload(
+      userId,
+      addressId,
+    );
+
+    let discount = 0;
+    if (couponCode) {
+      discount = (await resolveCoupon(couponCode, subtotal)).discountAmount;
+    }
+
+    const shipping = await calculateCheckoutShipping(
+      orderItems,
+      address.pincode,
+      Math.max(0, subtotal - discount),
+    );
+
+    res.status(200).json(
+      new ApiResponse(
+        200,
+        { shippingCharge: shipping.shippingCharge },
+        "Shipping rate calculated",
+      ),
+    );
+  },
+);
+
 // ─── POST /api/v1/orders/razorpay/create ─────────────────────────────────────
 
 export const createRazorpayOrder = asyncHandler(
   async (req: Request, res: Response): Promise<void> => {
     const userId = req.user!._id as Types.ObjectId;
-    const { addressId, couponCode, notes, redeemPoints = 0 } = req.body as {
+    const {
+      addressId,
+      couponCode,
+      notes,
+      redeemPoints = 0,
+      shippingCharge: quotedShippingCharge,
+    } = req.body as {
       addressId: string;
       couponCode?: string;
       notes?: string;
       redeemPoints?: number;
+      shippingCharge?: number;
     };
 
     if (!addressId) throw new ApiError(400, "addressId is required");
@@ -380,8 +451,21 @@ export const createRazorpayOrder = asyncHandler(
       appliedCoupon = result.coupon;
     }
 
-    const shippingCharge =
-      subtotal - discount >= FREE_SHIPPING_THRESHOLD ? 0 : SHIPPING_CHARGE;
+    const shipping = await calculateCheckoutShipping(
+      orderItems,
+      address.pincode,
+      Math.max(0, subtotal - discount),
+    );
+    const shippingCharge = shipping.shippingCharge;
+    if (
+      quotedShippingCharge !== undefined &&
+      Math.round(quotedShippingCharge * 100) !== Math.round(shippingCharge * 100)
+    ) {
+      throw new ApiError(
+        409,
+        "Shipping rate changed. Review the updated rate and try placing your order again.",
+      );
+    }
     const tax = 0;
     const orderTotal = subtotal - discount + shippingCharge + tax;
     const rzp = getRazorpay();
@@ -417,6 +501,7 @@ export const createRazorpayOrder = asyncHandler(
         total,
         pointsRedeemed: redeemPoints,
         pointsDiscount,
+        shippingMeta: shipping.shippingMeta,
         status: "pending",
         notes,
       });
@@ -460,7 +545,7 @@ export const verifyRazorpayPayment = asyncHandler(
     const attempt = await PaymentAttempt.findOne({
       razorpayOrderId: razorpay_order_id,
       user: req.user!._id,
-    });
+    }).select("+shippingMeta");
     if (!order && !attempt) throw new ApiError(404, "Order not found");
 
     // Verify only if currently pending — prevents duplicate processing
@@ -621,7 +706,7 @@ export const handleRazorpayWebhook = asyncHandler(
         } else {
           const attempt = await PaymentAttempt.findOne({
             razorpayOrderId: payment.order_id,
-          });
+          }).select("+shippingMeta");
           if (attempt) {
             await completeRazorpayAttempt(
               attempt,

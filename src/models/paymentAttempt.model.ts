@@ -15,6 +15,7 @@ export interface IPaymentAttempt extends Document {
   total: number;
   pointsRedeemed: number;
   pointsDiscount: number;
+  shippingMeta?: Record<string, unknown>;
   status: "pending" | "failed" | "paid";
   notes?: string;
 }
@@ -63,6 +64,7 @@ const paymentAttemptSchema = new Schema<IPaymentAttempt>(
     total: { type: Number, required: true },
     pointsRedeemed: { type: Number, default: 0 },
     pointsDiscount: { type: Number, default: 0 },
+    shippingMeta: { type: Schema.Types.Mixed, select: false },
     status: {
       type: String,
       enum: ["pending", "failed", "paid"],

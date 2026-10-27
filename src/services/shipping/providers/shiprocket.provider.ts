@@ -6,6 +6,8 @@ import { parseWeightInKilograms } from "../weight";
 import { User } from "../../../models/user.model";
 import {
   IShippingProvider,
+  ShippingRateItem,
+  StandardShippingRate,
   StandardShipmentResult,
   StandardTrackingResult,
 } from "../types";
@@ -17,6 +19,7 @@ export interface ShiprocketCredentials {
   password: string;
   channelId?: string;
   pickupLocation?: string;
+  pickupPostcode?: string;
   defaultLength?: number;
   defaultBreadth?: number;
   defaultHeight?: number;
@@ -136,7 +139,7 @@ export class ShiprocketProvider implements IShippingProvider {
     return data;
   }
 
-  private async resolveOrderPackage(order: IOrder): Promise<{
+  private async resolveOrderPackage(items: ShippingRateItem[]): Promise<{
     weight: number;
     length: number;
     breadth: number;
@@ -146,7 +149,7 @@ export class ShiprocketProvider implements IShippingProvider {
     const defaultLength = this.credentials.defaultLength ?? 10;
     const defaultBreadth = this.credentials.defaultBreadth ?? 10;
     const defaultHeight = this.credentials.defaultHeight ?? 10;
-    const productIds = order.items.map((item) => item.product);
+    const productIds = items.map((item) => item.product);
     const products = await Product.find({ _id: { $in: productIds } })
       .select("useCategoryShipping shipping category subCategory")
       .populate("category", "shipping")
@@ -158,7 +161,7 @@ export class ShiprocketProvider implements IShippingProvider {
       breadth: [] as number[],
       height: [] as number[],
     };
-    for (const item of order.items) {
+    for (const item of items) {
       const product = products.find(
         (p) => p._id.toString() === item.product.toString(),
       );
@@ -245,9 +248,113 @@ export class ShiprocketProvider implements IShippingProvider {
     };
   }
 
+  async calculateShippingRate(
+    items: ShippingRateItem[],
+    deliveryPostcode: string,
+    paymentMethod: "cod" | "prepaid",
+    declaredValue: number,
+  ): Promise<StandardShippingRate> {
+    const pickupPostcode = this.credentials.pickupPostcode?.trim();
+    if (!pickupPostcode || !/^\d{6}$/.test(pickupPostcode)) {
+      throw new ApiError(
+        400,
+        "Set a valid 6-digit Shiprocket pickup postcode in the shipping provider settings to calculate live rates",
+      );
+    }
+
+    const packageDetails = await this.resolveOrderPackage(items);
+    const volumetricWeight =
+      (packageDetails.length *
+        packageDetails.breadth *
+        packageDetails.height) /
+      5000;
+    const query = new URLSearchParams({
+      pickup_postcode: pickupPostcode,
+      delivery_postcode: deliveryPostcode,
+      weight: String(Math.max(packageDetails.weight, volumetricWeight)),
+      length: String(packageDetails.length),
+      breadth: String(packageDetails.breadth),
+      height: String(packageDetails.height),
+      cod: paymentMethod === "cod" ? "1" : "0",
+      declared_value: String(Math.max(0, declaredValue)),
+    });
+    const data = await this.request<{
+      data?: {
+        available_courier_companies?: Array<{
+          courier_company_id?: number;
+          courier_name?: string;
+          rate?: number;
+          total_charges?: number;
+          freight_charge?: number;
+          cod_charges?: number;
+          other_charges?: number;
+        }>;
+      };
+      available_courier_companies?: Array<{
+        courier_company_id?: number;
+        courier_name?: string;
+        rate?: number;
+        total_charges?: number;
+        freight_charge?: number;
+        cod_charges?: number;
+        other_charges?: number;
+      }>;
+      message?: string;
+    }>(`/courier/serviceability/?${query.toString()}`, { method: "GET" });
+
+    const courierOptions =
+      data.data?.available_courier_companies ??
+      data.available_courier_companies ??
+      [];
+    const rates: StandardShippingRate[] = courierOptions.flatMap((courier) => {
+      const charge =
+        courier.rate ??
+        courier.total_charges ??
+        (courier.freight_charge == null
+          ? undefined
+          : courier.freight_charge +
+            (courier.cod_charges ?? 0) +
+            (courier.other_charges ?? 0));
+      if (
+        typeof charge !== "number" ||
+        !Number.isFinite(charge) ||
+        charge < 0 ||
+        typeof courier.courier_company_id !== "number" ||
+        !Number.isSafeInteger(courier.courier_company_id) ||
+        courier.courier_company_id <= 0
+      ) {
+        return [];
+      }
+
+      return [
+        {
+          charge,
+          courierCompanyId: courier.courier_company_id,
+          ...(courier.courier_name
+            ? { courierName: courier.courier_name }
+            : {}),
+        },
+      ];
+    }).sort((a, b) => a.charge - b.charge);
+
+    const cheapest = rates[0];
+    if (!cheapest) {
+      throw new ApiError(
+        422,
+        data.message ||
+          "Shiprocket has no available courier service for this delivery postcode and parcel",
+      );
+    }
+
+    return {
+      ...cheapest,
+      charge: Math.round(cheapest.charge * 100) / 100,
+    };
+  }
+
   async createShipment(order: IOrder): Promise<StandardShipmentResult> {
     const user = await User.findById(order.user).select("email");
-    const packageDetails = await this.resolveOrderPackage(order);
+    const packageDetails = await this.resolveOrderPackage(order.items);
 
     const payload: Record<string, unknown> = {
       order_id: order.orderNumber,
@@ -342,6 +449,9 @@ export class ShiprocketProvider implements IShippingProvider {
     const awbData = await withShipmentContext(
       "AWB/courier assignment",
       async () => {
+        const quotedCourierCompanyId = (
+          order.shippingMeta as { quotedCourierCompanyId?: number } | undefined
+        )?.quotedCourierCompanyId;
         const result = await this.request<{
           awb_assign_status?: number | string;
           response?: {
@@ -357,8 +467,12 @@ export class ShiprocketProvider implements IShippingProvider {
           message?: string;
         }>("/courier/assign/awb", {
           method: "POST",
-          // Omitting courier_id uses the default courier configured in ShipRocket.
-          body: JSON.stringify({ shipment_id: numericShipmentId }),
+          body: JSON.stringify({
+            shipment_id: numericShipmentId,
+            ...(quotedCourierCompanyId
+              ? { courier_id: quotedCourierCompanyId }
+              : {}),
+          }),
         });
 
         const assigned = result.response?.data ?? result;

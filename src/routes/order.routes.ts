@@ -1,6 +1,7 @@
 import { Router } from "express";
 import {
   createRazorpayOrder,
+  getShippingQuote,
   verifyRazorpayPayment,
   failRazorpayPayment,
   getUserOrders,
@@ -13,6 +14,7 @@ import { verifyJWT, verifyAdmin } from "../middleware/auth";
 import { validate } from "../middleware/validate";
 import {
   createOrderSchema,
+  shippingQuoteSchema,
   razorpayVerifySchema,
   razorpayFailureSchema,
   updateOrderStatusSchema,
@@ -25,6 +27,7 @@ export const orderRouter = Router();
 orderRouter.use(verifyJWT);
 
 orderRouter.post("/razorpay/create", validate(createOrderSchema), createRazorpayOrder);
+orderRouter.post("/shipping-quote", validate(shippingQuoteSchema), getShippingQuote);
 orderRouter.post("/razorpay/verify", validate(razorpayVerifySchema), verifyRazorpayPayment);
 orderRouter.post("/razorpay/fail", validate(razorpayFailureSchema), failRazorpayPayment);
 orderRouter.get("/", getUserOrders);

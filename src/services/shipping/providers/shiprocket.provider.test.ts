@@ -52,13 +52,13 @@ function makeOrder(): IOrder {
   return order;
 }
 
-function mockProductLookup(): void {
+function mockProductLookup(products: unknown[] = []): void {
   const query = {
     select: vi.fn(),
     populate: vi.fn(),
   };
   query.select.mockReturnValue(query);
-  query.populate.mockReturnValueOnce(query).mockResolvedValueOnce([]);
+  query.populate.mockReturnValueOnce(query).mockResolvedValueOnce(products);
   vi.mocked(Product.find).mockReturnValue(query as never);
 }
 
@@ -125,6 +125,112 @@ describe("ShiprocketProvider.createShipment", () => {
     });
   });
 
+  it("uses the cheapest serviceable courier rate for the package and destination", async () => {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(response({ token: "test-token" }))
+        .mockResolvedValueOnce(response({
+          data: {
+            available_courier_companies: [
+              { courier_company_id: 303, courier_name: "Higher Rate", rate: 128.5 },
+              { courier_company_id: 404, courier_name: "Lowest Rate", rate: 74.25 },
+            ],
+          },
+        }));
+      vi.stubGlobal("fetch", fetchMock);
+      mockProductLookup();
+
+      const provider = new ShiprocketProvider({
+        email: "shiprocket-rate-test@example.com",
+        password: "password",
+        pickupPostcode: "560001",
+      });
+      const order = makeOrder();
+      const result = await provider.calculateShippingRate(
+        order.items,
+        order.shippingAddress.pincode,
+        "prepaid",
+        order.subtotal,
+      );
+
+      expect(result).toEqual({
+        charge: 74.25,
+        courierCompanyId: 404,
+        courierName: "Lowest Rate",
+      });
+      const serviceabilityUrl = new URL(String(fetchMock.mock.calls[1][0]));
+      expect(serviceabilityUrl.pathname).toBe(
+        "/v1/external/courier/serviceability/",
+      );
+      expect(Object.fromEntries(serviceabilityUrl.searchParams.entries())).toEqual({
+        pickup_postcode: "560001",
+        delivery_postcode: "400001",
+        weight: "0.5",
+        length: "10",
+        breadth: "10",
+        height: "10",
+        cod: "0",
+        declared_value: "100",
+      });
+  });
+
+  it("requires a configured pickup postcode before requesting a live rate", async () => {
+      const provider = new ShiprocketProvider({
+        email: "shiprocket-missing-pickup-test@example.com",
+        password: "password",
+      });
+
+      await expect(
+        provider.calculateShippingRate(
+          makeOrder().items,
+          "400001",
+          "prepaid",
+          100,
+        ),
+      ).rejects.toThrow(/valid 6-digit Shiprocket pickup postcode/);
+  });
+
+  it("uses parcel dimensions to send volumetric weight when it exceeds actual weight", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response({ token: "test-token" }))
+      .mockResolvedValueOnce(response({
+        data: {
+          available_courier_companies: [
+            { courier_company_id: 505, rate: 210 },
+          ],
+        },
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+    const order = makeOrder();
+    mockProductLookup([{
+      _id: order.items[0].product,
+      useCategoryShipping: false,
+      shipping: {
+        weight: "200 g",
+        length: "50",
+        breadth: "50",
+        height: "50",
+      },
+    }]);
+
+    const provider = new ShiprocketProvider({
+      email: "shiprocket-dimensional-rate-test@example.com",
+      password: "password",
+      pickupPostcode: "560001",
+    });
+    await provider.calculateShippingRate(
+      order.items,
+      order.shippingAddress.pincode,
+      "prepaid",
+      order.subtotal,
+    );
+
+    const serviceabilityUrl = new URL(String(fetchMock.mock.calls[1][0]));
+    expect(serviceabilityUrl.searchParams.get("weight")).toBe("25");
+  });
+
+});
+
+describe("ShiprocketProvider.createShipment failures", () => {
   it("surfaces shipment identifiers and stops before pickup when AWB assignment fails", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(response({ token: "test-token" }))

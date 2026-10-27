@@ -30,8 +30,25 @@ export interface StandardTrackingResult {
   checkpoints: TrackingCheckpointResult[];
 }
 
+export type ShippingRateItem = Pick<
+  IOrder["items"][number],
+  "product" | "name" | "quantity"
+>;
+
+export interface StandardShippingRate {
+  charge: number;
+  courierCompanyId: number;
+  courierName?: string;
+}
+
 export interface IShippingProvider {
   readonly slug: string;
+  calculateShippingRate?(
+    items: ShippingRateItem[],
+    deliveryPostcode: string,
+    paymentMethod: "cod" | "prepaid",
+    declaredValue: number,
+  ): Promise<StandardShippingRate>;
   createShipment(order: IOrder): Promise<StandardShipmentResult>;
   cancelShipment(order: IOrder): Promise<void>;
   trackShipment(order: IOrder): Promise<StandardTrackingResult>;
