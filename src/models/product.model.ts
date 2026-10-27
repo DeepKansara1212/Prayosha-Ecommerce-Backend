@@ -44,6 +44,7 @@ export interface IProduct extends Document {
   meaningTags?: Types.ObjectId[];
   rudrakshaFaces?: string;
   beadSize?: string;
+  stone?: string;
   noOfSticks?: number;
   badge?: "BESTSELLER" | "NEW" | "LIMITED" | "RARE" | "GIFT SET";
   stock: number;
@@ -84,6 +85,7 @@ const productSchema = new Schema<IProduct>(
     meaningTags: { type: [Schema.Types.ObjectId], ref: "Meaning", default: [] },
     rudrakshaFaces: { type: String, trim: true, maxlength: 50 },
     beadSize: { type: String, trim: true, maxlength: 50 },
+    stone: { type: String, trim: true, maxlength: 100 },
     noOfSticks: { type: Number, min: 1 },
     badge: { type: String, enum: ["BESTSELLER", "NEW", "LIMITED", "RARE", "GIFT SET"] },
     stock: { type: Number, required: true, default: 0, min: 0 },

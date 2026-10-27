@@ -5,6 +5,7 @@ import { ApiResponse } from "../utils/ApiResponse";
 import { Product, IProduct } from "../models/product.model";
 import { Category } from "../models/category.model";
 import { SubCategory } from "../models/subCategory.model";
+import { Meaning } from "../models/meaning.model";
 import { RashiProductMapping } from "../models/rashiProductMapping.model";
 import { PurposeProductMapping } from "../models/purposeProductMapping.model";
 import { paginate } from "../utils/pagination";
@@ -141,17 +142,32 @@ export const getProducts = asyncHandler(
 
     // Meaning filter — matches products assigned to the selected meaning.
     if (meaning) {
-      if (!Types.ObjectId.isValid(meaning)) {
-        res.status(200).json(
-          new ApiResponse(
-            200,
-            { products: [], pagination: paginate(pageNum, limitNum, 0) },
-            "Products fetched"
-          )
-        );
-        return;
+      let meaningId: Types.ObjectId;
+      if (Types.ObjectId.isValid(meaning)) {
+        meaningId = new Types.ObjectId(meaning);
+      } else {
+        const meaningName = meaning.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const matchingMeaning = meaningName
+          ? await Meaning.findOne({
+              active: true,
+              name: new RegExp(`^${meaningName}$`, "i"),
+            }).select("_id")
+          : null;
+
+        if (!matchingMeaning) {
+          res.status(200).json(
+            new ApiResponse(
+              200,
+              { products: [], pagination: paginate(pageNum, limitNum, 0) },
+              "Products fetched"
+            )
+          );
+          return;
+        }
+        meaningId = matchingMeaning._id;
       }
-      filter.meaningTags = new Types.ObjectId(meaning);
+
+      filter.meaningTags = meaningId;
     }
 
     // Sub-category filter — accepts a SubCategory id.
@@ -319,6 +335,7 @@ export const createProduct = asyncHandler(
       rudrakshaFaces,
       badge,
       beadSize,
+      stone,
       noOfSticks,
       stock,
       lowStockThreshold,
@@ -382,6 +399,7 @@ export const createProduct = asyncHandler(
       meaningTags: meaningTags ?? [],
       rudrakshaFaces,
       beadSize,
+      stone,
       noOfSticks,
       badge,
       stock: stock ?? 0,
@@ -450,6 +468,7 @@ export const updateProduct = asyncHandler(
       "meaningTags",
       "rudrakshaFaces",
       "beadSize",
+      "stone",
       "noOfSticks",
       "badge",
       "stock",

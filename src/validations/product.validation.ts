@@ -39,6 +39,7 @@ export const createProductSchema = z.object({
   meaningTags: z.array(objectId).optional(),
   rudrakshaFaces: z.string().trim().max(50).optional(),
   beadSize: z.string().trim().max(50).optional(),
+  stone: z.string().trim().max(100).optional(),
   noOfSticks: z.number().int().min(1).optional(),
   badge: z.enum(["BESTSELLER", "NEW", "LIMITED", "RARE", "GIFT SET"]).optional(),
   stock: z.number().int().min(0).default(0),
