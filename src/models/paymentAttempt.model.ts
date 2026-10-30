@@ -13,8 +13,7 @@ export interface IPaymentAttempt extends Document {
   shippingCharge: number;
   tax: number;
   total: number;
-  pointsRedeemed: number;
-  pointsDiscount: number;
+  cashbackUsed: number;
   shippingMeta?: Record<string, unknown>;
   status: "pending" | "failed" | "paid";
   notes?: string;
@@ -62,8 +61,7 @@ const paymentAttemptSchema = new Schema<IPaymentAttempt>(
     shippingCharge: { type: Number, default: 0 },
     tax: { type: Number, default: 0 },
     total: { type: Number, required: true },
-    pointsRedeemed: { type: Number, default: 0 },
-    pointsDiscount: { type: Number, default: 0 },
+    cashbackUsed: { type: Number, default: 0, min: 0 },
     shippingMeta: { type: Schema.Types.Mixed, select: false },
     status: {
       type: String,

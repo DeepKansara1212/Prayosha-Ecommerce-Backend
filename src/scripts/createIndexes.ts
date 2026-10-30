@@ -103,10 +103,10 @@ async function createIndexes(): Promise<void> {
   await ensureIndex(carts, { user: 1 }, { unique: true });
   console.log("✓ Cart indexes");
 
-  // ── Rewards ───────────────────────────────────────────────────────────────────
-  const rewards = db.collection("rewards");
-  await ensureIndex(rewards, { user: 1, createdAt: -1 });
-  console.log("✓ Reward indexes");
+  // ── Wallet ────────────────────────────────────────────────────────────────────
+  const walletTransactions = db.collection("wallettransactions");
+  await ensureIndex(walletTransactions, { user: 1, createdAt: -1 });
+  console.log("✓ Wallet indexes");
 
   // ── Astrology Calculators ───────────────────────────────────────────────────
   const rashis = db.collection("rashis");

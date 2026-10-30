@@ -1,30 +1,26 @@
 import { Request, Response } from "express";
+import { Types } from "mongoose";
 import { asyncHandler } from "../utils/asyncHandler";
 import { ApiResponse } from "../utils/ApiResponse";
-import { Reward } from "../models/reward.model";
+import { WalletTransaction } from "../models/walletTransaction.model";
 import { User } from "../models/user.model";
 import { paginate } from "../utils/pagination";
-import { Types } from "mongoose";
 
-// ─── GET /api/v1/rewards/balance ──────────────────────────────────────────────
-
-export const getRewardsBalance = asyncHandler(
+export const getWalletBalance = asyncHandler(
   async (req: Request, res: Response): Promise<void> => {
-    const user = await User.findById(req.user!._id).select("rewardPoints");
+    const user = await User.findById(req.user!._id).select("cashbackBalance");
 
     res.status(200).json(
       new ApiResponse(
         200,
-        { rewardPoints: user?.rewardPoints ?? 0 },
-        "Rewards balance fetched"
+        { cashbackBalance: user?.cashbackBalance ?? 0 },
+        "Wallet balance fetched"
       )
     );
   }
 );
 
-// ─── GET /api/v1/rewards/history ─────────────────────────────────────────────
-
-export const getRewardsHistory = asyncHandler(
+export const getWalletHistory = asyncHandler(
   async (req: Request, res: Response): Promise<void> => {
     const userId = req.user!._id as Types.ObjectId;
     const page = Math.max(1, parseInt(req.query.page as string, 10) || 1);
@@ -32,15 +28,14 @@ export const getRewardsHistory = asyncHandler(
     const skip = (page - 1) * limit;
 
     const filter = { user: userId };
-
     const [transactions, total, user] = await Promise.all([
-      Reward.find(filter)
+      WalletTransaction.find(filter)
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
         .populate("order", "items.name items.quantity total createdAt"),
-      Reward.countDocuments(filter),
-      User.findById(userId).select("rewardPoints"),
+      WalletTransaction.countDocuments(filter),
+      User.findById(userId).select("cashbackBalance"),
     ]);
 
     res.status(200).json(
@@ -48,10 +43,10 @@ export const getRewardsHistory = asyncHandler(
         200,
         {
           transactions,
-          totalPoints: user?.rewardPoints ?? 0,
+          cashbackBalance: user?.cashbackBalance ?? 0,
           pagination: paginate(page, limit, total),
         },
-        "Rewards history fetched"
+        "Wallet history fetched"
       )
     );
   }

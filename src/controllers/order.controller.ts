@@ -10,9 +10,12 @@ import { Cart } from "../models/cart.model";
 import { Product } from "../models/product.model";
 import { User } from "../models/user.model";
 import { Coupon, ICoupon } from "../models/coupon.model";
-import { Reward } from "../models/reward.model";
+import { WalletTransaction } from "../models/walletTransaction.model";
 import { Settings } from "../models/settings.model";
-import { calculatePoints, MIN_REDEMPTION_POINTS } from "../utils/rewardUtils";
+import {
+  calculateCashback,
+  calculateCashbackRedemption,
+} from "../utils/cashbackUtils";
 import { env } from "../config/env";
 import { paginate } from "../utils/pagination";
 import { sendOrderConfirmationEmail } from "../utils/email";
@@ -65,40 +68,39 @@ async function resolveCoupon(
   return { coupon, discountAmount };
 }
 
-async function reserveRewardPoints(
+async function reserveCashback(
   userId: Types.ObjectId,
-  requestedPoints: number,
-  total: number
+  eligibleSubtotal: number
 ): Promise<number> {
-  if (!Number.isSafeInteger(requestedPoints) || requestedPoints < 0)
-    throw new ApiError(400, "Redeemed points must be a non-negative whole number");
-  if (requestedPoints > 0 && requestedPoints < MIN_REDEMPTION_POINTS)
-    throw new ApiError(400, `At least ${MIN_REDEMPTION_POINTS} points are required to redeem`);
+  const user = await User.findById(userId).select("cashbackBalance");
+  if (!user) throw new ApiError(404, "User not found");
 
-  const maxRedeemablePoints = Math.floor(total * 10 + 1e-8);
-  if (requestedPoints > maxRedeemablePoints)
-    throw new ApiError(400, "Redeemed points exceed the order total");
-  if (requestedPoints === 0) return 0;
+  const cashbackUsed = calculateCashbackRedemption(
+    user.cashbackBalance,
+    eligibleSubtotal
+  );
+  if (cashbackUsed === 0) return 0;
 
-  const user = await User.findOneAndUpdate(
-    { _id: userId, rewardPoints: { $gte: requestedPoints } },
-    { $inc: { rewardPoints: -requestedPoints } },
+  const updatedUser = await User.findOneAndUpdate(
+    { _id: userId, cashbackBalance: { $gte: cashbackUsed } },
+    { $inc: { cashbackBalance: -cashbackUsed } },
     { new: true }
   );
-  if (!user) throw new ApiError(400, "Insufficient reward points");
+  if (!updatedUser)
+    throw new ApiError(409, "Wallet balance changed. Refresh checkout and try again.");
 
-  return Math.round(requestedPoints * 10) / 100;
+  return cashbackUsed;
 }
 
-async function releaseAttemptPoints(attemptId: Types.ObjectId): Promise<void> {
+async function releaseAttemptCashback(attemptId: Types.ObjectId): Promise<void> {
   const failedAttempt = await PaymentAttempt.findOneAndUpdate(
     { _id: attemptId, status: "pending" },
     { $set: { status: "failed" } },
     { new: true }
   );
-  if (failedAttempt && failedAttempt.pointsRedeemed > 0) {
+  if (failedAttempt && failedAttempt.cashbackUsed > 0) {
     await User.findByIdAndUpdate(failedAttempt.user, {
-      $inc: { rewardPoints: failedAttempt.pointsRedeemed },
+      $inc: { cashbackBalance: failedAttempt.cashbackUsed },
     });
   }
 }
@@ -192,31 +194,40 @@ async function calculateCheckoutShipping(
   };
 }
 
-// ─── Shared: award points + determine free gift after successful order ────────
+// ─── Shared: award cashback + determine free gift after successful order ──────
 
-async function applyRewardsAndGift(
+async function applyCashbackAndGift(
   order: IOrder,
   userId: Types.ObjectId
-): Promise<{ pointsEarned: number; newPointsBalance: number }> {
-  const pointsEarned = calculatePoints(order.total);
+): Promise<{ cashbackEarned: number; cashbackBalance: number }> {
+  const eligibleSpend = Math.max(
+    0,
+    order.subtotal - order.discount - order.cashbackUsed
+  );
+  const cashbackEarned = calculateCashback(eligibleSpend);
 
-  await User.findByIdAndUpdate(userId, { $inc: { rewardPoints: pointsEarned } });
-  if (order.pointsRedeemed > 0) {
-    await Reward.create({
+  if (order.cashbackUsed > 0) {
+    await WalletTransaction.create({
       user: userId,
       order: order._id,
-      pointsEarned: order.pointsRedeemed,
+      cashbackAmount: order.cashbackUsed,
       orderTotal: order.total,
       type: "redeemed",
     });
   }
-  await Reward.create({
-    user: userId,
-    order: order._id,
-    pointsEarned,
-    orderTotal: order.total,
-  });
-  order.pointsEarned = pointsEarned;
+  if (cashbackEarned > 0) {
+    await User.findByIdAndUpdate(userId, {
+      $inc: { cashbackBalance: cashbackEarned },
+    });
+    await WalletTransaction.create({
+      user: userId,
+      order: order._id,
+      cashbackAmount: cashbackEarned,
+      orderTotal: order.total,
+      type: "earned",
+    });
+  }
+  order.cashbackEarned = cashbackEarned;
 
   const settings = await Settings.getSettings();
   if (settings.freeGiftEnabled) {
@@ -229,8 +240,11 @@ async function applyRewardsAndGift(
 
   await order.save();
 
-  const updatedUser = await User.findById(userId).select("rewardPoints");
-  return { pointsEarned, newPointsBalance: updatedUser?.rewardPoints ?? 0 };
+  const updatedUser = await User.findById(userId).select("cashbackBalance");
+  return {
+    cashbackEarned,
+    cashbackBalance: updatedUser?.cashbackBalance ?? 0,
+  };
 }
 
 // ─── Shared: mark a Razorpay order paid + run all post-payment side effects ───
@@ -242,7 +256,7 @@ async function finalizePaidOrder(
   order: IOrder,
   razorpayPaymentId: string,
   note: string
-): Promise<{ order: IOrder; pointsEarned: number; newPointsBalance: number }> {
+): Promise<{ order: IOrder; cashbackEarned: number; cashbackBalance: number }> {
   const paidOrder = await Order.findOneAndUpdate(
     { _id: order._id, paymentStatus: { $in: ["pending", "failed"] } },
     {
@@ -263,11 +277,11 @@ async function finalizePaidOrder(
     if (!currentOrder || currentOrder.paymentStatus !== "paid")
       throw new ApiError(409, "Order payment is already being processed");
 
-    const currentUser = await User.findById(currentOrder.user).select("rewardPoints");
+    const currentUser = await User.findById(currentOrder.user).select("cashbackBalance");
     return {
       order: currentOrder,
-      pointsEarned: currentOrder.pointsEarned,
-      newPointsBalance: currentUser?.rewardPoints ?? 0,
+      cashbackEarned: currentOrder.cashbackEarned,
+      cashbackBalance: currentUser?.cashbackBalance ?? 0,
     };
   }
 
@@ -298,7 +312,7 @@ async function finalizePaidOrder(
 
   return {
     order: paidOrder,
-    ...(await applyRewardsAndGift(paidOrder, paidOrder.user as Types.ObjectId)),
+    ...(await applyCashbackAndGift(paidOrder, paidOrder.user as Types.ObjectId)),
   };
 }
 
@@ -306,7 +320,7 @@ async function completeRazorpayAttempt(
   attempt: IPaymentAttempt,
   razorpayPaymentId: string,
   note: string
-): Promise<{ order: IOrder; pointsEarned: number; newPointsBalance: number }> {
+): Promise<{ order: IOrder; cashbackEarned: number; cashbackBalance: number }> {
   let order = await Order.findOne({ razorpayOrderId: attempt.razorpayOrderId });
 
   if (!order) {
@@ -323,8 +337,7 @@ async function completeRazorpayAttempt(
       shippingMeta: attempt.shippingMeta,
       tax: attempt.tax,
       total: attempt.total,
-      pointsRedeemed: attempt.pointsRedeemed,
-      pointsDiscount: attempt.pointsDiscount,
+      cashbackUsed: attempt.cashbackUsed,
       paymentMethod: "razorpay",
       paymentStatus: "pending",
       razorpayOrderId: attempt.razorpayOrderId,
@@ -426,13 +439,11 @@ export const createRazorpayOrder = asyncHandler(
       addressId,
       couponCode,
       notes,
-      redeemPoints = 0,
       shippingCharge: quotedShippingCharge,
     } = req.body as {
       addressId: string;
       couponCode?: string;
       notes?: string;
-      redeemPoints?: number;
       shippingCharge?: number;
     };
 
@@ -467,10 +478,11 @@ export const createRazorpayOrder = asyncHandler(
       );
     }
     const tax = 0;
-    const orderTotal = subtotal - discount + shippingCharge + tax;
+    const eligibleSubtotal = Math.max(0, subtotal - discount);
+    const orderTotal = eligibleSubtotal + shippingCharge + tax;
     const rzp = getRazorpay();
-    const pointsDiscount = await reserveRewardPoints(userId, redeemPoints, orderTotal);
-    const total = orderTotal - pointsDiscount;
+    const cashbackUsed = await reserveCashback(userId, eligibleSubtotal);
+    const total = orderTotal - cashbackUsed;
 
     let rzpOrder: { id: string; amount: number; currency: string };
     try {
@@ -499,15 +511,16 @@ export const createRazorpayOrder = asyncHandler(
         shippingCharge,
         tax,
         total,
-        pointsRedeemed: redeemPoints,
-        pointsDiscount,
+        cashbackUsed,
         shippingMeta: shipping.shippingMeta,
         status: "pending",
         notes,
       });
     } catch (error) {
-      if (redeemPoints > 0) {
-        await User.findByIdAndUpdate(userId, { $inc: { rewardPoints: redeemPoints } });
+      if (cashbackUsed > 0) {
+        await User.findByIdAndUpdate(userId, {
+          $inc: { cashbackBalance: cashbackUsed },
+        });
       }
       throw error;
     }
@@ -572,7 +585,7 @@ export const verifyRazorpayPayment = asyncHandler(
         await order.save();
       }
       if (attempt) {
-        await releaseAttemptPoints(attempt._id as Types.ObjectId);
+        await releaseAttemptCashback(attempt._id as Types.ObjectId);
       }
       throw new ApiError(400, "Payment signature is invalid");
     }
@@ -580,8 +593,8 @@ export const verifyRazorpayPayment = asyncHandler(
     // Payment verified — update order and run post-payment side effects
     let result: {
       order: IOrder;
-      pointsEarned: number;
-      newPointsBalance: number;
+      cashbackEarned: number;
+      cashbackBalance: number;
     };
     if (attempt) {
       result = await completeRazorpayAttempt(
@@ -636,7 +649,7 @@ export const failRazorpayPayment = asyncHandler(
       await legacyOrder.save();
     }
     if (attempt?.status === "pending") {
-      await releaseAttemptPoints(attempt._id as Types.ObjectId);
+      await releaseAttemptCashback(attempt._id as Types.ObjectId);
     }
 
     res.status(200).json(
@@ -725,7 +738,7 @@ export const handleRazorpayWebhook = asyncHandler(
         const attempt = await PaymentAttempt.findOne({
           razorpayOrderId: payment.order_id,
         });
-        if (attempt) await releaseAttemptPoints(attempt._id as Types.ObjectId);
+        if (attempt) await releaseAttemptCashback(attempt._id as Types.ObjectId);
       }
     }
 

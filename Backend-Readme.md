@@ -531,14 +531,14 @@ Banner images upload to Cloudinary folder **`prayosha-banners`** via in-memory M
 
 ---
 
-### Rewards — `/api/v1/rewards` (all JWT)
+### Cashback wallet — `/api/v1/wallet` (all JWT)
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/balance` | Current user's `rewardPoints` total |
-| GET | `/history` | Paginated earn history, each entry linked to an order (`page`, `limit`) |
+| GET | `/balance` | Current user's `cashbackBalance` |
+| GET | `/history` | Paginated wallet transactions linked to orders (`page`, `limit`) |
 
-Reward points are credited on order completion via `rewardUtils.ts`. Points are stored on the `User` document (`rewardPoints` field) and each transaction is recorded in the `rewards` collection.
+Customers earn proportional cashback at ₹2 per ₹100 of product spend after coupon discounts and wallet cashback are deducted; shipping is excluded. On checkout, 50% of the lower of the available wallet balance and post-coupon product subtotal is automatically applied, also excluding shipping. Earned cashback is credited after payment succeeds. Balances are stored on `User.cashbackBalance`, and transactions are recorded in `wallettransactions`.
 
 ---
 
@@ -779,17 +779,17 @@ Slug auto-generated from `name` on save.
 
 ---
 
-### Reward (`rewards`)
+### WalletTransaction (`wallettransactions`)
 
 | Field | Type | Notes |
 |---|---|---|
 | `user` | ObjectId | ref `User` |
 | `order` | ObjectId | ref `Order` |
-| `pointsEarned` | number | min 0 |
+| `cashbackAmount` | number | positive amount earned or redeemed |
 | `orderTotal` | number | order total at earn time |
-| `type` | `"earned"` | only `earned` for now |
+| `type` | `"earned" \| "redeemed"` | wallet credit or redemption |
 
-Index: `{ user: 1, createdAt: -1 }`. Current points total is denormalized onto `User.rewardPoints`.
+Index: `{ user: 1, createdAt: -1 }`. Current cashback balance is denormalized onto `User.cashbackBalance`.
 
 ---
 
@@ -937,7 +937,7 @@ Backend/
       rudrakshaProductMapping.controller.ts
       rudrakshaType.controller.ts
       review.controller.ts
-      reward.controller.ts
+      wallet.controller.ts
       search.controller.ts
       settings.controller.ts
       wishlist.controller.ts
@@ -961,7 +961,7 @@ Backend/
       purposeRudrakshaMapping.model.ts
       rashi.model.ts
       rashiProductMapping.model.ts
-      reward.model.ts
+      walletTransaction.model.ts
       review.model.ts
       rudrakshaProductMapping.model.ts
       rudrakshaType.model.ts
@@ -989,7 +989,7 @@ Backend/
       rudrakshaProductMapping.routes.ts
       rudrakshaType.routes.ts
       review.routes.ts
-      reward.routes.ts
+      wallet.routes.ts
       search.routes.ts
       settings.routes.ts
       wishlist.routes.ts
@@ -1010,7 +1010,7 @@ Backend/
       asyncHandler.ts
       email.ts
       pagination.ts
-      rewardUtils.ts
+      cashbackUtils.ts
       sms.ts
     validations/
       auth.validation.ts
@@ -1059,7 +1059,7 @@ Backend/
 | Newsletter | ✓ | |
 | Blogs (public + admin) | ✓ | Structured content sections |
 | Hero banners (public + admin) | ✓ | Reorder, toggle, Cloudinary |
-| Rewards (balance + history) | ✓ | Points earned per order; `User.rewardPoints` |
+| Cashback wallet (balance + history) | ✓ | ₹2 per ₹100 after coupon; 50% redemption excluding shipping |
 | Store settings (public + admin) | ✓ | Singleton; `freeGiftEnabled` toggle, WhatsApp config (`whatsappNumber`, `whatsappDefaultMessage`) |
 | Rate limiting & sanitization | ✓ | |
 | Order confirmation email | ✓ | Optional |

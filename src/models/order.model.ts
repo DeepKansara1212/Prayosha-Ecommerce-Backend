@@ -69,9 +69,8 @@ export interface IOrder extends Document {
   trackingCheckpoints?: ITrackingCheckpoint[];
   statusHistory: IStatusHistoryEntry[];
   notes?: string;
-  pointsEarned: number;
-  pointsRedeemed: number;
-  pointsDiscount: number;
+  cashbackEarned: number;
+  cashbackUsed: number;
   hasFreeGift: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -175,9 +174,8 @@ const orderSchema = new Schema<IOrder>(
     trackingCheckpoints: { type: [trackingCheckpointSchema], default: undefined },
     statusHistory: { type: [statusHistorySchema], default: [] },
     notes: { type: String },
-    pointsEarned: { type: Number, default: 0 },
-    pointsRedeemed: { type: Number, default: 0 },
-    pointsDiscount: { type: Number, default: 0 },
+    cashbackEarned: { type: Number, default: 0, min: 0 },
+    cashbackUsed: { type: Number, default: 0, min: 0 },
     hasFreeGift: { type: Boolean, default: false },
   },
   { timestamps: true }
