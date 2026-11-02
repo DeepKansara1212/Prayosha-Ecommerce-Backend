@@ -5,6 +5,7 @@ export const createOrderSchema = z.object({
   couponCode: z.string().optional(),
   notes: z.string().max(500).optional(),
   shippingCharge: z.number().min(0).optional(),
+  useCashback: z.boolean().optional(),
 });
 
 export const shippingQuoteSchema = z.object({

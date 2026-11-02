@@ -440,11 +440,13 @@ export const createRazorpayOrder = asyncHandler(
       couponCode,
       notes,
       shippingCharge: quotedShippingCharge,
+      useCashback = false,
     } = req.body as {
       addressId: string;
       couponCode?: string;
       notes?: string;
       shippingCharge?: number;
+      useCashback?: boolean;
     };
 
     if (!addressId) throw new ApiError(400, "addressId is required");
@@ -481,7 +483,9 @@ export const createRazorpayOrder = asyncHandler(
     const eligibleSubtotal = Math.max(0, subtotal - discount);
     const orderTotal = eligibleSubtotal + shippingCharge + tax;
     const rzp = getRazorpay();
-    const cashbackUsed = await reserveCashback(userId, eligibleSubtotal);
+    const cashbackUsed = useCashback
+      ? await reserveCashback(userId, eligibleSubtotal)
+      : 0;
     const total = orderTotal - cashbackUsed;
 
     let rzpOrder: { id: string; amount: number; currency: string };
@@ -561,12 +565,6 @@ export const verifyRazorpayPayment = asyncHandler(
     }).select("+shippingMeta");
     if (!order && !attempt) throw new ApiError(404, "Order not found");
 
-    // Verify only if currently pending — prevents duplicate processing
-    if (order && order.paymentStatus !== "pending")
-      throw new ApiError(400, `Payment already ${order.paymentStatus}`);
-    if (attempt && attempt.status === "paid")
-      throw new ApiError(400, "Payment already paid");
-
     // HMAC SHA256 verification
     const expectedSignature = crypto
       .createHmac("sha256", env.RAZORPAY_KEY_SECRET!)
@@ -574,7 +572,7 @@ export const verifyRazorpayPayment = asyncHandler(
       .digest("hex");
 
     if (expectedSignature !== razorpay_signature) {
-      if (order) {
+      if (order?.paymentStatus === "pending") {
         order.paymentStatus = "failed";
         order.status = "cancelled";
         order.statusHistory.push({
@@ -584,7 +582,7 @@ export const verifyRazorpayPayment = asyncHandler(
         });
         await order.save();
       }
-      if (attempt) {
+      if (attempt?.status === "pending") {
         await releaseAttemptCashback(attempt._id as Types.ObjectId);
       }
       throw new ApiError(400, "Payment signature is invalid");

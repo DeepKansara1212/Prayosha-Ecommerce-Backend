@@ -220,6 +220,95 @@ export const getProducts = asyncHandler(
   }
 );
 
+// ─── GET /api/v1/products/admin/search ──────────────────────────────────────
+
+export const getAdminProducts = asyncHandler(
+  async (req: Request, res: Response): Promise<void> => {
+    const {
+      search = "",
+      category,
+      badge,
+      stockStatus = "all",
+      page = "1",
+      limit = "20",
+    } = req.query as Record<string, string>;
+
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.min(48, Math.max(1, parseInt(limit, 10) || 20));
+    const filter: FilterQuery<IProduct> = {};
+
+    if (category) {
+      const selectedCategory = await Category.findOne({ slug: category }).select("_id");
+      if (!selectedCategory) {
+        res.status(200).json(
+          new ApiResponse(
+            200,
+            { products: [], pagination: paginate(pageNum, limitNum, 0) },
+            "Products fetched"
+          )
+        );
+        return;
+      }
+      filter.category = selectedCategory._id;
+    }
+
+    if (badge) filter.badge = badge.toUpperCase();
+
+    if (stockStatus === "inStock") {
+      filter.$expr = { $gt: ["$stock", "$lowStockThreshold"] };
+    } else if (stockStatus === "lowStock") {
+      filter.$expr = {
+        $and: [
+          { $gt: ["$stock", 0] },
+          { $lte: ["$stock", "$lowStockThreshold"] },
+        ],
+      };
+    } else if (stockStatus === "outOfStock") {
+      filter.stock = 0;
+    }
+
+    const terms = search
+      .trim()
+      .slice(0, 200)
+      .match(/[a-zA-Z0-9]+/g)
+      ?.slice(0, 12) ?? [];
+    if (terms.length > 0) {
+      filter.$and = terms.map(term => {
+        const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const pattern = new RegExp(escaped, "i");
+        return {
+          $or: [
+            { name: pattern },
+            { sku: pattern },
+            { slug: pattern },
+            { description: pattern },
+            { tags: pattern },
+          ],
+        };
+      });
+    }
+
+    const skip = (pageNum - 1) * limitNum;
+    const [products, total] = await Promise.all([
+      Product.find(filter)
+        .sort({ name: 1 })
+        .skip(skip)
+        .limit(limitNum)
+        .populate("category", "name slug shipping")
+        .select("-costPrice"),
+      Product.countDocuments(filter),
+    ]);
+
+    res.status(200).json(
+      new ApiResponse(
+        200,
+        { products, pagination: paginate(pageNum, limitNum, total) },
+        "Products fetched"
+      )
+    );
+  }
+);
+
 // ─── GET /api/v1/products/featured ───────────────────────────────────────────
 
 export const getFeaturedProducts = asyncHandler(
