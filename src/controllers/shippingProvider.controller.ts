@@ -4,6 +4,7 @@ import { ApiError } from "../utils/ApiError";
 import { ApiResponse } from "../utils/ApiResponse";
 import { ShippingProvider } from "../models/shippingProvider.model";
 import { ShippingFactory } from "../services/shipping/ShippingFactory";
+import { AfterShipCourier } from "../services/shipping/aftership-tracking.service";
 
 function toSafeProvider(doc: InstanceType<typeof ShippingProvider>) {
   const obj = doc.toObject();
@@ -29,6 +30,16 @@ export const getShippingProviders = asyncHandler(
   }
 );
 
+export const getAfterShipCouriers = asyncHandler(
+  async (_req: Request, res: Response): Promise<void> => {
+    const client = await ShippingFactory.getAfterShipTrackingClient();
+    const couriers: AfterShipCourier[] = await client.listCouriers();
+    res.status(200).json(
+      new ApiResponse(200, { couriers }, "AfterShip couriers fetched"),
+    );
+  },
+);
+
 // ─── PATCH /api/v1/admin/shipping-providers/:id ──────────────────────────────
 
 export const updateShippingProvider = asyncHandler(
@@ -42,9 +53,6 @@ export const updateShippingProvider = asyncHandler(
     if (!provider) throw new ApiError(404, "Shipping provider not found");
 
     if (credentials) {
-      // Copy-pasted keys routinely carry a trailing newline/space, which
-      // AfterShip's gateway rejects as a malformed token before it ever
-      // reaches app-level validation.
       const trimmed = Object.fromEntries(
         Object.entries(credentials).map(([key, value]) => [
           key,

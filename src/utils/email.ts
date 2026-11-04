@@ -206,3 +206,87 @@ export async function sendContactInquiryEmail(message: {
     text,
   });
 }
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => {
+    const entities: Record<string, string> = {
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;",
+    };
+    return entities[character];
+  });
+}
+
+export async function sendShipmentTrackingEmail(
+  order: IOrder,
+  user: IUser,
+): Promise<void> {
+  if (!env.EMAIL_USER || !env.EMAIL_PASS) {
+    throw new Error("Tracking email delivery is not configured");
+  }
+  if (!user.email) {
+    throw new Error("Customer email is unavailable");
+  }
+  if (!order.trackingNumber || !order.carrier || !order.trackingUrl) {
+    throw new Error("Order is missing required tracking details");
+  }
+
+  let trackingUrl: URL;
+  try {
+    trackingUrl = new URL(order.trackingUrl);
+  } catch {
+    throw new Error("Order has an invalid tracking link");
+  }
+  if (trackingUrl.protocol !== "https:") {
+    throw new Error("Order tracking link must use HTTPS");
+  }
+
+  const name = escapeHtml(user.name);
+  const orderNumber = escapeHtml(order.orderNumber);
+  const carrier = escapeHtml(order.carrier);
+  const trackingNumber = escapeHtml(order.trackingNumber);
+  const link = escapeHtml(trackingUrl.toString());
+  const transporter = nodemailer.createTransport({
+    service: "gmail",
+    auth: { user: env.EMAIL_USER, pass: env.EMAIL_PASS },
+  });
+
+  await transporter.sendMail({
+    from: `"prayosha crystals" <${env.EMAIL_USER}>`,
+    to: user.email,
+    subject: `Your order #${order.orderNumber} has shipped`,
+    text: [
+      `Dear ${user.name},`,
+      `Your order #${order.orderNumber} has been dispatched.`,
+      `Courier: ${order.carrier}`,
+      `Tracking number: ${order.trackingNumber}`,
+      `Track your parcel: ${trackingUrl.toString()}`,
+    ].join("\n\n"),
+    html: `<!doctype html>
+<html lang="en">
+  <body style="margin:0;padding:24px;background:#EDE8DC;font-family:Arial,Helvetica,sans-serif;color:#1C1A17">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+      <tr><td align="center">
+        <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#F5F0E8;border:1px solid #E2DAC8;border-radius:8px">
+          <tr><td style="padding:28px 32px;background:#1C1A17;color:#F5F0E8;text-align:center">
+            <p style="margin:0;color:#C4A35A;font-size:12px;letter-spacing:2px;text-transform:uppercase">prayosha crystals</p>
+            <h1 style="margin:12px 0 0;font-size:22px">Your order has shipped</h1>
+          </td></tr>
+          <tr><td style="padding:28px 32px">
+            <p>Dear <strong>${name}</strong>,</p>
+            <p>Your order <strong>#${orderNumber}</strong> has been dispatched.</p>
+            <p>Courier: <strong>${carrier}</strong><br />Tracking number: <strong>${trackingNumber}</strong></p>
+            <p style="margin:24px 0">
+              <a href="${link}" style="display:inline-block;padding:12px 18px;background:#7B5EA7;color:#fff;text-decoration:none;border-radius:4px">Track your parcel</a>
+            </p>
+          </td></tr>
+        </table>
+      </td></tr>
+    </table>
+  </body>
+</html>`,
+  });
+}

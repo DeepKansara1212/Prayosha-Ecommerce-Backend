@@ -6,7 +6,7 @@ import {
   downloadLabelHandler,
   generateInvoiceHandler,
   handleShiprocketWebhook,
-  handleAftershipWebhook,
+  resendTrackingEmailHandler,
 } from "../controllers/shipping.controller";
 import { handleRazorpayWebhook } from "../controllers/order.controller";
 import { verifyJWT, verifyAdmin } from "../middleware/auth";
@@ -18,16 +18,6 @@ import { createShipmentSchema } from "../validations/shipping.validation";
 export const webhookRouter = Router();
 
 webhookRouter.post("/shiprocket", json(), handleShiprocketWebhook);
-
-webhookRouter.post(
-  "/aftership",
-  json({
-    verify: (req: Request, _res, buf) => {
-      req.rawBody = buf;
-    },
-  }),
-  handleAftershipWebhook
-);
 
 webhookRouter.post(
   "/razorpay",
@@ -47,6 +37,7 @@ adminShippingRouter.use(verifyJWT, verifyAdmin);
 
 adminShippingRouter.post("/:id/shipments", validate(createShipmentSchema), createShipment);
 adminShippingRouter.get("/:id/shipments/track", trackShipmentHandler);
+adminShippingRouter.post("/:id/shipments/tracking-email", resendTrackingEmailHandler);
 adminShippingRouter.post("/:id/shipments/cancel", cancelShipmentHandler);
 adminShippingRouter.post("/:id/shipments/label", downloadLabelHandler);
 adminShippingRouter.post("/:id/shipments/invoice", generateInvoiceHandler);

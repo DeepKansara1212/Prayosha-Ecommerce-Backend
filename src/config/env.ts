@@ -70,7 +70,6 @@ const envSchema = z.object({
     .string({ required_error: "ENCRYPTION_KEY is required" })
     .min(32, "ENCRYPTION_KEY must be at least 32 characters"),
   SHIPROCKET_WEBHOOK_TOKEN: z.string().optional(),
-  AFTERSHIP_WEBHOOK_SECRET: z.string().optional(),
 
   // Location search for astrology calculators — free, unauthenticated
   // Open-Meteo geocoding endpoint; overridable if a self-hosted mirror is

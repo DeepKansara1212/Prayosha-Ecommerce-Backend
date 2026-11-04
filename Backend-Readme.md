@@ -143,6 +143,7 @@ ADMIN_URL=http://localhost:5173
 # Razorpay (optional — payment routes return 503 without these)
 RAZORPAY_KEY_ID=<key_id>
 RAZORPAY_KEY_SECRET=<key_secret>
+RAZORPAY_WEBHOOK_SECRET=<webhook_secret>
 
 # Email (optional — order confirmation emails skipped without these)
 EMAIL_USER=<gmail_address>
@@ -705,6 +706,7 @@ Slug auto-generated from `name` on save.
 | `paymentMethod` | `razorpay` \| `cod` | |
 | `paymentStatus` | pending \| paid \| failed \| refunded | |
 | `razorpayOrderId?`, `razorpayPaymentId?` | string | |
+| `razorpayRefundId?`, `refundStatus?` | string | refundStatus: initiating \| pending \| processed \| failed |
 | `status` | placed \| confirmed \| processing \| shipped \| delivered \| cancelled \| refunded | |
 | `trackingNumber?`, `notes?` | string | |
 | `statusHistory[]` | | status, note?, timestamp |
@@ -884,6 +886,12 @@ Serialises `ApiError`; includes stack in development.
 3. `POST /orders/razorpay/verify` with `razorpay_order_id`, `razorpay_payment_id`, `razorpay_signature`.
 4. Server verifies HMAC → `paymentStatus: paid`, `status: confirmed`, cart cleared.
 5. Order confirmation email sent if `EMAIL_USER` / `EMAIL_PASS` set and user has email.
+6. When an admin cancels a paid Razorpay order, the backend requests a full refund.
+   `paymentStatus` becomes `refunded` only after Razorpay reports it processed;
+   the refund webhook updates pending or failed refunds. Configure the Razorpay
+   webhook URL as `/api/v1/webhooks/razorpay`, subscribe to `payment.captured`,
+   `payment.failed`, `refund.processed`, and `refund.failed`, and set the
+   matching `RAZORPAY_WEBHOOK_SECRET`.
 
 ### COD order
 

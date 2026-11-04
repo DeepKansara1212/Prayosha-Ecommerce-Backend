@@ -1,13 +1,13 @@
 import { Request, Response } from "express";
-import crypto from "crypto";
 import { asyncHandler } from "../utils/asyncHandler";
 import { ApiError } from "../utils/ApiError";
 import { ApiResponse } from "../utils/ApiResponse";
 import { Order, IOrder } from "../models/order.model";
+import { User } from "../models/user.model";
 import { env } from "../config/env";
 import { ShippingService } from "../services/shipping/ShippingService";
 import { mapShiprocketStatusToOrderStatus } from "../services/shipping/providers/shiprocket.provider";
-import { mapAftershipTagToOrderStatus } from "../services/shipping/providers/aftership.provider";
+import { sendShipmentTrackingEmail } from "../utils/email";
 
 declare global {
   namespace Express {
@@ -32,19 +32,117 @@ async function loadOrder(id: string): Promise<IOrder> {
 
 export const createShipment = asyncHandler(
   async (req: Request, res: Response): Promise<void> => {
-    const { provider } = req.body as { provider: string };
+    const {
+      provider,
+      carrierName,
+      courierSlug,
+      trackingNumber,
+    } = req.body as {
+      provider: string;
+      carrierName?: string;
+      courierSlug?: string;
+      trackingNumber?: string;
+    };
     const order = await loadOrder(req.params.id);
 
     const updated = await ShippingService.createShipment(
       order,
       provider,
-      req.user?._id?.toString()
+      req.user?._id?.toString(),
+      provider === "aftership" && carrierName && trackingNumber
+        ? { carrierName, trackingNumber, courierSlug }
+        : undefined,
     );
+
+    if (provider === "aftership") {
+      let trackingEmailSent = false;
+      let trackingEmailError: string | undefined;
+      try {
+        const customer = await User.findById(updated.user);
+        if (!customer?.email) {
+          throw new Error("Customer email is unavailable");
+        }
+        await sendShipmentTrackingEmail(updated, customer);
+        trackingEmailSent = true;
+      } catch (error) {
+        trackingEmailError =
+          error instanceof Error ? error.message : "Tracking email delivery failed";
+        console.error(
+          `[AfterShip] Tracking notification failed for order ${updated._id}:`,
+          error,
+        );
+      }
+
+      if (trackingEmailSent) {
+        updated.trackingEmailSentAt = new Date();
+        try {
+          await updated.save();
+        } catch (error) {
+          trackingEmailError = "Customer was notified, but the notification time could not be saved";
+          console.error(
+            `[AfterShip] Email was sent but its notification time could not be saved for order ${updated._id}:`,
+            error,
+          );
+        }
+      }
+
+      res.status(200).json(
+        new ApiResponse(
+          200,
+          {
+            ...updated.toObject(),
+            trackingEmailSent,
+            ...(trackingEmailError ? { trackingEmailError } : {}),
+          },
+          trackingEmailSent
+            ? "Tracking registered and customer notified"
+            : "Tracking registered; customer notification failed",
+        ),
+      );
+      return;
+    }
 
     res
       .status(200)
       .json(new ApiResponse(200, updated, `Shipment created using ${provider}`));
   }
+);
+
+// ─── POST /api/v1/admin/orders/:id/shipments/tracking-email ─────────────────
+
+export const resendTrackingEmailHandler = asyncHandler(
+  async (req: Request, res: Response): Promise<void> => {
+    const order = await loadOrder(req.params.id);
+    if (order.shippingProvider !== "aftership" || !order.trackingUrl) {
+      throw new ApiError(400, "This order has no AfterShip tracking link to email");
+    }
+
+    const customer = await User.findById(order.user);
+    if (!customer?.email) {
+      throw new ApiError(400, "The customer does not have an email address");
+    }
+
+    await sendShipmentTrackingEmail(order, customer);
+    order.trackingEmailSentAt = new Date();
+    let trackingEmailStatusSaved = true;
+    try {
+      await order.save();
+    } catch (error) {
+      trackingEmailStatusSaved = false;
+      console.error(
+        `[AfterShip] Email was resent but its notification time could not be saved for order ${order._id}:`,
+        error,
+      );
+    }
+
+    res.status(200).json(
+      new ApiResponse(
+        200,
+        { trackingEmailSent: true, trackingEmailStatusSaved, trackingEmailSentAt: order.trackingEmailSentAt },
+        "Tracking email sent",
+      ),
+    );
+  },
 );
 
 // ─── GET /api/v1/admin/orders/:id/shipments/track ────────────────────────────
@@ -169,116 +267,6 @@ export const handleShiprocketWebhook = asyncHandler(
       await order.save();
     } catch (err) {
       console.error("[ShipRocket Webhook] Processing error:", err);
-    }
-
-    res.status(200).json({ success: true });
-  }
-);
-
-// ─── POST /api/v1/webhooks/aftership ─────────────────────────────────────────
-
-export const handleAftershipWebhook = asyncHandler(
-  async (req: Request, res: Response): Promise<void> => {
-    const signature = req.header("aftership-hmac-sha256");
-    if (!env.AFTERSHIP_WEBHOOK_SECRET || !signature) {
-      console.warn(
-        env.AFTERSHIP_WEBHOOK_SECRET
-          ? "[AfterShip Webhook] Rejected: signature header is missing"
-          : "[AfterShip Webhook] Rejected: webhook secret is not configured"
-      );
-      res.status(401).json({ success: false, message: "Unauthorized" });
-      return;
-    }
-
-    if (!req.rawBody) {
-      console.warn("[AfterShip Webhook] Rejected: raw request body is unavailable");
-      res.status(401).json({ success: false, message: "Unauthorized" });
-      return;
-    }
-
-    const expected = crypto
-      .createHmac("sha256", env.AFTERSHIP_WEBHOOK_SECRET)
-      .update(req.rawBody)
-      .digest("base64");
-
-    const providedSignature = Buffer.from(signature);
-    const expectedSignature = Buffer.from(expected);
-    if (
-      providedSignature.length !== expectedSignature.length ||
-      !crypto.timingSafeEqual(providedSignature, expectedSignature)
-    ) {
-      console.warn("[AfterShip Webhook] Rejected: invalid HMAC signature");
-      res.status(401).json({ success: false, message: "Unauthorized" });
-      return;
-    }
-
-    try {
-      const payload = req.body as {
-        msg?: {
-          id?: string;
-          tracking_number?: string;
-          tag?: string;
-          checkpoints?: Array<{
-            checkpoint_time?: string;
-            message?: string;
-            location?: string;
-          }>;
-          courier_tracking_link?: string;
-          tracking_url?: string;
-        };
-      };
-
-      const msg = payload.msg;
-      if (!msg) {
-        res.status(200).json({ success: true });
-        return;
-      }
-
-      const order =
-        (msg.tracking_number
-          ? await Order.findOne({
-              $or: [
-                { awbNumber: msg.tracking_number },
-                { trackingNumber: msg.tracking_number },
-              ],
-            })
-          : null) ||
-        (msg.id
-          ? await Order.findOne({ shippingProvider: "aftership", shipmentId: msg.id })
-          : null);
-
-      if (!order) {
-        console.warn("[AfterShip Webhook] Order not found for tracking update");
-        res.status(200).json({ success: true });
-        return;
-      }
-
-      if (msg.tag) order.shippingStatus = msg.tag;
-
-      const trackingUrl = msg.courier_tracking_link || msg.tracking_url;
-      if (trackingUrl) order.trackingUrl = trackingUrl;
-
-      if (Array.isArray(msg.checkpoints) && msg.checkpoints.length > 0) {
-        order.trackingCheckpoints = msg.checkpoints.map((cp) => ({
-          time: parseCheckpointTime(cp.checkpoint_time || ""),
-          message: cp.message || "",
-          location: cp.location || "",
-        }));
-      }
-
-      const mappedStatus = msg.tag ? mapAftershipTagToOrderStatus(msg.tag) : null;
-      if (mappedStatus && mappedStatus !== order.status) {
-        order.status = mappedStatus;
-        order.statusHistory.push({
-          status: mappedStatus,
-          note: `AfterShip webhook: ${msg.tag}`,
-          timestamp: new Date(),
-        });
-      }
-
-      await order.save();
-    } catch (err) {
-      console.error("[AfterShip Webhook] Processing error:", err);
     }
 
     res.status(200).json({ success: true });

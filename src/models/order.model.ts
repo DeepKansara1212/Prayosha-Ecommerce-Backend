@@ -46,6 +46,8 @@ export interface IOrder extends Document {
   paymentStatus: "pending" | "paid" | "failed" | "refunded";
   razorpayOrderId?: string;
   razorpayPaymentId?: string;
+  razorpayRefundId?: string;
+  refundStatus?: "initiating" | "pending" | "processed" | "failed";
   status:
     | "placed"
     | "confirmed"
@@ -57,6 +59,9 @@ export interface IOrder extends Document {
   trackingNumber?: string;
   shippingProvider?: string;
   shipmentId?: string;
+  aftershipTrackingId?: string;
+  aftershipCourierSlug?: string;
+  trackingEmailSentAt?: Date;
   awbNumber?: string;
   carrier?: string;
   shippingStatus?: string;
@@ -146,6 +151,11 @@ const orderSchema = new Schema<IOrder>(
     },
     razorpayOrderId: { type: String },
     razorpayPaymentId: { type: String },
+    razorpayRefundId: { type: String },
+    refundStatus: {
+      type: String,
+      enum: ["initiating", "pending", "processed", "failed"],
+    },
     status: {
       type: String,
       enum: [
@@ -162,6 +172,9 @@ const orderSchema = new Schema<IOrder>(
     trackingNumber: { type: String },
     shippingProvider: { type: String },
     shipmentId: { type: String },
+    aftershipTrackingId: { type: String },
+    aftershipCourierSlug: { type: String },
+    trackingEmailSentAt: { type: Date },
     awbNumber: { type: String },
     carrier: { type: String },
     shippingStatus: { type: String },

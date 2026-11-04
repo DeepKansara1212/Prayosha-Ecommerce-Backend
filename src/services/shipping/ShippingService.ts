@@ -3,11 +3,18 @@ import { IOrder, Order } from "../../models/order.model";
 import { ShippingProvider } from "../../models/shippingProvider.model";
 import { ShippingFactory } from "./ShippingFactory";
 import { StandardTrackingResult } from "./types";
+import {
+  AfterShipTrackingData,
+  getAfterShipTrackingUrl,
+  mapAfterShipTagToOrderStatus,
+} from "./aftership-tracking.service";
 
 type ShippingEvent =
   | "shipment_created"
   | "shipment_cancelled"
   | "shipment_failed"
+  | "tracking_registered"
+  | "tracking_registration_cleared"
   | "tracking_requested"
   | "label_requested"
   | "invoice_requested";
@@ -45,7 +52,15 @@ export const ShippingService = {
     order: IOrder,
     providerSlug: string,
     adminUserId?: string,
+    trackingInput?: { carrierName: string; trackingNumber: string; courierSlug?: string },
   ): Promise<IOrder> {
+    if (providerSlug === "aftership") {
+      if (!trackingInput) {
+        throw new ApiError(400, "Courier and tracking number are required for AfterShip");
+      }
+      return registerAfterShipTracking(order, trackingInput, adminUserId);
+    }
+
     if (order.shippingProvider && order.shipmentId) {
       throw new ApiError(
         400,
@@ -177,6 +192,42 @@ export const ShippingService = {
     }
 
     const providerSlug = order.shippingProvider;
+    if (providerSlug === "aftership") {
+      if (
+        order.aftershipTrackingId ||
+        order.shipmentId ||
+        !["Registering tracking", "Registration outcome unknown"].includes(
+          order.shippingStatus || "",
+        )
+      ) {
+        throw new ApiError(
+          400,
+          "AfterShip does not book or cancel shipments. Contact the courier managing this parcel.",
+        );
+      }
+
+      order.statusHistory.push({
+        status: order.status,
+        note: "Cleared pending AfterShip tracking registration locally; verify AfterShip before retrying",
+        timestamp: new Date(),
+      });
+      order.shippingProvider = undefined;
+      order.shippingStatus = undefined;
+      order.trackingNumber = undefined;
+      order.awbNumber = undefined;
+      order.carrier = undefined;
+      order.trackingUrl = undefined;
+      order.trackingCheckpoints = undefined;
+      order.shipmentCreatedAt = undefined;
+      await order.save();
+      logShippingEvent("tracking_registration_cleared", {
+        provider: "aftership",
+        orderId: order._id.toString(),
+        adminUserId,
+        meta: { reconciliationRequired: true },
+      });
+      return order;
+    }
 
     // A shipment attempt can fail after the order was "reserved" for a
     // provider (shippingProvider set) but before the provider ever returned
@@ -269,6 +320,27 @@ export const ShippingService = {
       throw new ApiError(400, "This order has no shipment to track");
     }
 
+    if (order.shippingProvider === "aftership") {
+      if (!order.aftershipTrackingId) {
+        throw new ApiError(
+          400,
+          "This legacy AfterShip record has no tracking registration to refresh",
+        );
+      }
+      const client = await ShippingFactory.getAfterShipTrackingClient();
+      const tracking = await client.getTracking(order.aftershipTrackingId);
+      applyAfterShipTracking(order, tracking);
+      await order.save();
+      await touchLastSynced("aftership");
+      logShippingEvent("tracking_requested", {
+        provider: "aftership",
+        orderId: order._id.toString(),
+        adminUserId,
+        meta: { aftershipTrackingId: order.aftershipTrackingId },
+      });
+      return toStandardTrackingResult(tracking, order);
+    }
+
     const provider = await ShippingFactory.getProvider(order.shippingProvider);
     const result = await provider.trackShipment(order);
 
@@ -308,6 +380,9 @@ export const ShippingService = {
         "This order has no shipment to generate a label for",
       );
     }
+    if (order.shippingProvider === "aftership") {
+      throw new ApiError(400, "AfterShip is tracking-only; labels must be obtained from the courier");
+    }
 
     const provider = await ShippingFactory.getProvider(order.shippingProvider);
     const result = await provider.downloadLabel(order);
@@ -334,6 +409,9 @@ export const ShippingService = {
         "This order has no shipment to generate an invoice for",
       );
     }
+    if (order.shippingProvider === "aftership") {
+      throw new ApiError(400, "AfterShip is tracking-only; invoices must be obtained from the courier");
+    }
 
     const provider = await ShippingFactory.getProvider(order.shippingProvider);
     const result = await provider.generateInvoice(order);
@@ -350,3 +428,173 @@ export const ShippingService = {
     return result;
   },
 };
+
+async function registerAfterShipTracking(
+  order: IOrder,
+  input: { carrierName: string; trackingNumber: string; courierSlug?: string },
+  adminUserId?: string,
+): Promise<IOrder> {
+  if (order.shippingProvider) {
+    if (order.aftershipTrackingId) {
+      throw new ApiError(400, "AfterShip tracking has already been registered for this order");
+    }
+    throw new ApiError(
+      409,
+      `This order already has a ${order.shippingProvider} shipment or a pending registration`,
+    );
+  }
+  if (!["confirmed", "processing"].includes(order.status)) {
+    throw new ApiError(400, "Order must be confirmed or processing before adding tracking");
+  }
+  if (order.paymentMethod === "razorpay" && order.paymentStatus !== "paid") {
+    throw new ApiError(400, "An unpaid Razorpay order cannot be shipped");
+  }
+
+  const client = await ShippingFactory.getAfterShipTrackingClient();
+  const reservation = await Order.updateOne(
+    {
+      _id: order._id,
+      $or: [{ shippingProvider: { $exists: false } }, { shippingProvider: null }],
+    },
+    { $set: { shippingProvider: "aftership", shippingStatus: "Registering tracking" } },
+  );
+  if (reservation.modifiedCount !== 1) {
+    throw new ApiError(
+      409,
+      "Another shipment or tracking registration has started. Refresh the order before retrying.",
+    );
+  }
+
+  let tracking: AfterShipTrackingData;
+  try {
+    tracking = await client.createTracking({
+      trackingNumber: input.trackingNumber,
+      courierSlug: input.courierSlug,
+      orderNumber: order.orderNumber,
+      destinationCountry: "IND",
+    });
+  } catch (error) {
+    await Order.updateOne(
+      { _id: order._id, shippingProvider: "aftership" },
+      { $set: { shippingStatus: "Registration outcome unknown" } },
+    );
+    logShippingEvent("shipment_failed", {
+      provider: "aftership",
+      orderId: order._id.toString(),
+      adminUserId,
+      meta: {
+        stage: "tracking_registration",
+        error: error instanceof Error ? error.message : String(error),
+        reconciliationRequired: true,
+      },
+    });
+    console.error(
+      `[AfterShip] Tracking registration for order ${order._id} did not complete. ` +
+        "Check the AfterShip dashboard before retrying to avoid duplicate tracking records.",
+    );
+    throw error;
+  }
+
+  order.aftershipTrackingId = tracking.id;
+  order.shippingProvider = "aftership";
+  order.aftershipCourierSlug = tracking.slug || input.courierSlug;
+  order.trackingNumber = tracking.tracking_number;
+  order.awbNumber = tracking.tracking_number;
+  order.carrier = input.carrierName;
+  order.trackingUrl = getAfterShipTrackingUrl(tracking, input.courierSlug);
+  order.shippingStatus = tracking.tag || "InfoReceived";
+  order.shipmentCreatedAt = new Date();
+  applyAfterShipTracking(order, tracking, false);
+  order.status = "shipped";
+  order.statusHistory.push({
+    status: "shipped",
+    note: "Courier tracking registered with AfterShip",
+    timestamp: new Date(),
+  });
+
+  try {
+    await order.save();
+  } catch (error) {
+    console.error(
+      `[AfterShip] Tracking ${tracking.id} was registered but could not be saved for order ${order._id}.`,
+    );
+    throw new ApiError(
+      502,
+      `Tracking was registered with AfterShip (ID: ${tracking.id}) but failed to save locally. Do not retry.`,
+    );
+  }
+
+  await touchLastSynced("aftership");
+  logShippingEvent("tracking_registered", {
+    provider: "aftership",
+    orderId: order._id.toString(),
+    adminUserId,
+    meta: { aftershipTrackingId: tracking.id, courierSlug: order.aftershipCourierSlug },
+  });
+  return order;
+}
+
+function applyAfterShipTracking(
+  order: IOrder,
+  tracking: AfterShipTrackingData,
+  updateOrderStatus = true,
+): void {
+  order.shippingStatus = tracking.tag || order.shippingStatus || "InfoReceived";
+  order.trackingNumber = tracking.tracking_number;
+  order.awbNumber = tracking.tracking_number;
+  if (tracking.slug) order.aftershipCourierSlug = tracking.slug;
+  order.trackingUrl = getAfterShipTrackingUrl(tracking, order.aftershipCourierSlug);
+  if (tracking.checkpoints?.length) {
+    order.trackingCheckpoints = tracking.checkpoints.map((checkpoint) => {
+      const parsed = new Date(checkpoint.checkpoint_time || "");
+      return {
+        time: Number.isNaN(parsed.getTime()) ? new Date() : parsed,
+        message: checkpoint.message || "",
+        location: checkpoint.location || "",
+      };
+    });
+  }
+
+  const mappedStatus = updateOrderStatus
+    ? mapAfterShipTagToOrderStatus(tracking.tag)
+    : null;
+  const statusRank: Partial<Record<IOrder["status"], number>> = {
+    placed: 0,
+    confirmed: 1,
+    processing: 2,
+    shipped: 3,
+    delivered: 4,
+  };
+  const currentRank = statusRank[order.status];
+  const nextRank = mappedStatus ? statusRank[mappedStatus] : undefined;
+  if (
+    mappedStatus &&
+    currentRank !== undefined &&
+    nextRank !== undefined &&
+    nextRank > currentRank
+  ) {
+    order.status = mappedStatus;
+    order.statusHistory.push({
+      status: mappedStatus,
+      note: `AfterShip tracking update: ${tracking.tag}`,
+      timestamp: new Date(),
+    });
+  }
+}
+
+function toStandardTrackingResult(
+  tracking: AfterShipTrackingData,
+  order: IOrder,
+): StandardTrackingResult {
+  return {
+    status: tracking.tag || "InfoReceived",
+    trackingNumber: tracking.tracking_number,
+    carrier: order.carrier || tracking.slug,
+    trackingUrl: order.trackingUrl,
+    checkpoints: (tracking.checkpoints || []).map((checkpoint) => ({
+      time: checkpoint.checkpoint_time || "",
+      message: checkpoint.message || "",
+      location: checkpoint.location || "",
+    })),
+  };
+}

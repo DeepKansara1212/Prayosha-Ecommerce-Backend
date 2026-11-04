@@ -8,6 +8,18 @@ const PORT = Number(env.PORT) || 8000;
 
 async function seedShippingProviders(): Promise<void> {
   for (const meta of REGISTERED_PROVIDERS) {
+    if (meta.slug === "aftership") {
+      await ShippingProvider.findOneAndUpdate(
+        { slug: meta.slug },
+        {
+          $set: { name: meta.name, description: meta.description },
+          $setOnInsert: { slug: meta.slug },
+        },
+        { upsert: true },
+      );
+      continue;
+    }
+
     await ShippingProvider.findOneAndUpdate(
       { slug: meta.slug },
       { $setOnInsert: { name: meta.name, slug: meta.slug, description: meta.description } },

@@ -4,6 +4,7 @@ import {
   updateShippingProvider,
   setDefaultShippingProvider,
   testShippingProviderConnection,
+  getAfterShipCouriers,
 } from "../controllers/shippingProvider.controller";
 import { verifyJWT, verifyAdmin } from "../middleware/auth";
 import { validate } from "../middleware/validate";
@@ -14,6 +15,7 @@ export const adminShippingProviderRouter = Router();
 adminShippingProviderRouter.use(verifyJWT, verifyAdmin);
 
 adminShippingProviderRouter.get("/", getShippingProviders);
+adminShippingProviderRouter.get("/aftership/couriers", getAfterShipCouriers);
 adminShippingProviderRouter.patch(
   "/:id",
   validate(updateShippingProviderSchema),
