@@ -64,6 +64,47 @@ async function syncTaxonomyMappings(
   }
 }
 
+async function validateCategorySubCategories(
+  assignments: unknown,
+  categoryIds: string[]
+): Promise<{ category: Types.ObjectId; subCategory?: Types.ObjectId }[]> {
+  if (assignments === undefined) return [];
+  if (!Array.isArray(assignments)) throw new ApiError(400, "Invalid category subcategories");
+
+  const selectedIds = new Set(categoryIds);
+  const seenCategories = new Set<string>();
+  return Promise.all(assignments.map(async (assignment) => {
+    if (!assignment || typeof assignment !== "object") {
+      throw new ApiError(400, "Invalid category subcategory assignment");
+    }
+
+    const { category, subCategory } = assignment as Record<string, unknown>;
+    if (typeof category !== "string" || !selectedIds.has(category) || seenCategories.has(category)) {
+      throw new ApiError(400, "Subcategory assignment must match a selected category");
+    }
+    seenCategories.add(category);
+
+    if (subCategory === undefined || subCategory === "") {
+      return { category: new Types.ObjectId(category) };
+    }
+    if (typeof subCategory !== "string" || !Types.ObjectId.isValid(subCategory)) {
+      throw new ApiError(400, "Invalid subcategory");
+    }
+
+    const childCategory = await SubCategory.findOne({
+      _id: subCategory,
+      parentCategory: category,
+    }).select("_id");
+    if (!childCategory) {
+      throw new ApiError(400, "Subcategory does not belong to its selected category");
+    }
+    return {
+      category: new Types.ObjectId(category),
+      subCategory: new Types.ObjectId(subCategory),
+    };
+  }));
+}
+
 // ─── GET /api/v1/products ─────────────────────────────────────────────────────
 
 export const getProducts = asyncHandler(
@@ -104,7 +145,7 @@ export const getProducts = asyncHandler(
         );
         return;
       }
-      filter.category = cat._id;
+      filter.$or = [{ categories: cat._id }, { category: cat._id }];
     }
 
     // Full-text search
@@ -206,6 +247,9 @@ export const getProducts = asyncHandler(
         .skip(skip)
         .limit(limitNum)
         .populate("category", "name slug shipping")
+        .populate("categories", "name slug shipping")
+        .populate("categorySubCategories.category", "name slug shipping")
+        .populate("categorySubCategories.subCategory", "name slug")
         .select("-costPrice"),
       Product.countDocuments(filter),
     ]);
@@ -249,7 +293,7 @@ export const getAdminProducts = asyncHandler(
         );
         return;
       }
-      filter.category = selectedCategory._id;
+      filter.$or = [{ categories: selectedCategory._id }, { category: selectedCategory._id }];
     }
 
     if (badge) filter.badge = badge.toUpperCase();
@@ -295,6 +339,7 @@ export const getAdminProducts = asyncHandler(
         .skip(skip)
         .limit(limitNum)
         .populate("category", "name slug shipping")
+        .populate("categories", "name slug shipping")
         .select("-costPrice"),
       Product.countDocuments(filter),
     ]);
@@ -317,6 +362,9 @@ export const getFeaturedProducts = asyncHandler(
       .sort({ createdAt: -1 })
       .limit(8)
       .populate("category", "name slug shipping")
+      .populate("categories", "name slug shipping")
+      .populate("categorySubCategories.category", "name slug shipping")
+      .populate("categorySubCategories.subCategory", "name slug")
       .select("-costPrice");
 
     res
@@ -333,8 +381,20 @@ export const getCategorySummary = asyncHandler(
       { $match: { isActive: true } },
       { $sort: { isFeatured: -1, createdAt: -1 } },
       {
+        $set: {
+          categoryList: {
+            $cond: [
+              { $gt: [{ $size: { $ifNull: ["$categories", []] } }, 0] },
+              "$categories",
+              ["$category"],
+            ],
+          },
+        },
+      },
+      { $unwind: "$categoryList" },
+      {
         $group: {
-          _id: "$category",
+          _id: "$categoryList",
           count: { $sum: 1 },
           image: { $first: { $arrayElemAt: ["$images", 0] } },
         },
@@ -356,6 +416,9 @@ export const getProductBySlug = asyncHandler(
       isActive: true,
     })
       .populate("category", "name slug shipping")
+      .populate("categories", "name slug shipping")
+      .populate("categorySubCategories.category", "name slug shipping")
+      .populate("categorySubCategories.subCategory", "name slug")
       .select("-costPrice");
 
     if (!product) throw new ApiError(404, "Product not found");
@@ -380,17 +443,26 @@ export const getRelatedProducts = asyncHandler(
     const product = await Product.findOne({
       slug: req.params.slug,
       isActive: true,
-    }).select("_id category");
+    }).select("_id category categories");
 
     if (!product) throw new ApiError(404, "Product not found");
 
+    const relatedCategoryIds = product.categories?.length
+      ? product.categories
+      : [product.category];
     const related = await Product.find({
-      category: product.category,
+      $or: [
+        { categories: { $in: relatedCategoryIds } },
+        { category: { $in: relatedCategoryIds } },
+      ],
       _id: { $ne: product._id },
       isActive: true,
     })
       .limit(4)
       .populate("category", "name slug shipping")
+      .populate("categories", "name slug shipping")
+      .populate("categorySubCategories.category", "name slug shipping")
+      .populate("categorySubCategories.subCategory", "name slug")
       .select("-costPrice");
 
     res
@@ -414,6 +486,8 @@ export const createProduct = asyncHandler(
       costPrice,
       video,
       category,
+      categories,
+      categorySubCategories,
       subCategory,
       tags,
       chakra,
@@ -441,10 +515,15 @@ export const createProduct = asyncHandler(
       purposeIds,
     } = req.body as Record<string, unknown>;
 
-    if (!name || !sku || !description || !category) {
+    const categoryIds = Array.isArray(categories)
+      ? [...new Set(categories.filter((id): id is string => typeof id === "string"))]
+      : typeof category === "string"
+        ? [category]
+        : [];
+    if (!name || !sku || !description || categoryIds.length === 0) {
       throw new ApiError(
         400,
-        "name, sku, description, and category are required"
+        "name, sku, description, and at least one category are required"
       );
     }
 
@@ -457,16 +536,24 @@ export const createProduct = asyncHandler(
     }
     validateShippingWeights(shipping);
 
-    const cat = await Category.findById(category);
-    if (!cat) throw new ApiError(404, "Category not found");
+    const validCategories = await Category.find({ _id: { $in: categoryIds } }).select("_id");
+    if (validCategories.length !== categoryIds.length) throw new ApiError(404, "Category not found");
+    const primaryCategory = categoryIds[0];
 
-    if (subCategory !== undefined && subCategory !== null) {
+    const normalizedAssignments = categorySubCategories ?? (
+      subCategory
+        ? [{ category: primaryCategory, subCategory }]
+        : []
+    );
+    const validatedAssignments = await validateCategorySubCategories(normalizedAssignments, categoryIds);
+    if (subCategory !== undefined && subCategory !== null && !categorySubCategories) {
       if (typeof subCategory !== "string" || !Types.ObjectId.isValid(subCategory)) {
         throw new ApiError(400, "Invalid subcategory");
       }
-      const childCategory = await SubCategory.findOne({ _id: subCategory, parentCategory: category });
-      if (!childCategory) throw new ApiError(400, "Subcategory does not belong to the selected category");
     }
+    const primarySubCategory = validatedAssignments.find(
+      assignment => assignment.category.toString() === primaryCategory
+    )?.subCategory;
 
     const product = await Product.create({
       name,
@@ -478,8 +565,10 @@ export const createProduct = asyncHandler(
       comparePrice,
       costPrice,
       video,
-      category,
-      subCategory: subCategory ?? undefined,
+      category: primaryCategory,
+      categories: categoryIds,
+      categorySubCategories: validatedAssignments,
+      subCategory: primarySubCategory,
       tags: tags ?? [],
       chakra,
       shape,
@@ -523,15 +612,15 @@ export const updateProduct = asyncHandler(
     const product = await Product.findById(req.params.id);
     if (!product) throw new ApiError(404, "Product not found");
 
-    if (req.body.subCategory !== undefined && req.body.subCategory !== null) {
+    if (req.body.subCategory !== undefined && req.body.subCategory !== null && req.body.categorySubCategories === undefined) {
       if (typeof req.body.subCategory !== "string" || !Types.ObjectId.isValid(req.body.subCategory)) {
         throw new ApiError(400, "Invalid subcategory");
       }
-      const category = req.body.category ?? product.category;
-      const childCategory = await SubCategory.findOne({
-        _id: req.body.subCategory,
-        parentCategory: category,
-      });
+      const categories = Array.isArray(req.body.categories)
+        ? req.body.categories
+        : [req.body.category ?? product.category];
+      const category = categories[0];
+      const childCategory = await SubCategory.findOne({ _id: req.body.subCategory, parentCategory: category }).select("_id");
       if (!childCategory) throw new ApiError(400, "Subcategory does not belong to the selected category");
     }
 
@@ -548,6 +637,7 @@ export const updateProduct = asyncHandler(
       "costPrice",
       "video",
       "category",
+      "categories",
       "subCategory",
       "tags",
       "chakra",
@@ -585,6 +675,40 @@ export const updateProduct = asyncHandler(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (product as any)[key] = req.body[key];
       }
+    }
+
+    if (req.body.categories !== undefined) {
+      const categoryIds = [...new Set(req.body.categories as string[])];
+      const validCategories = await Category.find({ _id: { $in: categoryIds } }).select("_id");
+      if (validCategories.length !== categoryIds.length) throw new ApiError(404, "Category not found");
+      product.categories = categoryIds.map(id => new Types.ObjectId(id));
+      product.category = product.categories[0];
+      if (req.body.categorySubCategories === undefined) {
+        product.categorySubCategories = (product.categorySubCategories ?? [])
+          .filter(assignment => categoryIds.includes(assignment.category.toString()));
+      }
+    } else if (req.body.category !== undefined) {
+      product.category = new Types.ObjectId(req.body.category as string);
+      product.categories = [product.category];
+      if (req.body.categorySubCategories === undefined) {
+        product.categorySubCategories = [];
+      }
+    }
+
+    if (req.body.categorySubCategories !== undefined) {
+      const categoryIds = (product.categories?.length ? product.categories : [product.category]).map(id => id.toString());
+      product.categorySubCategories = await validateCategorySubCategories(
+        req.body.categorySubCategories,
+        categoryIds
+      );
+      const primarySubCategory = product.categorySubCategories.find(
+        assignment => assignment.category.toString() === product.category.toString()
+      )?.subCategory;
+      product.subCategory = primarySubCategory;
+    } else if (req.body.categories !== undefined || req.body.category !== undefined) {
+      product.subCategory = product.categorySubCategories?.find(
+        assignment => assignment.category.toString() === product.category.toString()
+      )?.subCategory;
     }
 
     if (req.body.price !== undefined) {

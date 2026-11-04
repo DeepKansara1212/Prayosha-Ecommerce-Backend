@@ -74,6 +74,57 @@ describe("product validation", () => {
     }
   });
 
+  it("accepts multiple product categories", () => {
+    const result = createProductSchema.safeParse({
+      name: "Amethyst",
+      sku: "AM-002",
+      description: "Natural amethyst crystal",
+      categories: [
+        "507f1f77bcf86cd799439011",
+        "507f191e810c19729de860ea",
+      ],
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.categories).toEqual([
+        "507f1f77bcf86cd799439011",
+        "507f191e810c19729de860ea",
+      ]);
+    }
+  });
+
+  it("accepts a subcategory assignment for each selected category", () => {
+    const result = createProductSchema.safeParse({
+      name: "Amethyst",
+      sku: "AM-004",
+      description: "Natural amethyst crystal",
+      categories: [
+        "507f1f77bcf86cd799439011",
+        "507f191e810c19729de860ea",
+      ],
+      categorySubCategories: [
+        { category: "507f1f77bcf86cd799439011", subCategory: "507f1f77bcf86cd799439012" },
+        { category: "507f191e810c19729de860ea", subCategory: "507f191e810c19729de860eb" },
+      ],
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.categorySubCategories).toHaveLength(2);
+    }
+  });
+
+  it("rejects products without any category", () => {
+    const result = createProductSchema.safeParse({
+      name: "Amethyst",
+      sku: "AM-003",
+      description: "Natural amethyst crystal",
+    });
+
+    expect(result.success).toBe(false);
+  });
+
   it("accepts multiple meaning assignments", () => {
     const result = createProductSchema.safeParse({
       ...validProduct,

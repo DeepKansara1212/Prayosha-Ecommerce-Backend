@@ -24,8 +24,9 @@ export const search = asyncHandler(
       )
         .sort({ score: { $meta: "textScore" } } as any)
         .limit(limit)
-        .select("name slug price images badge stock")
-        .populate("category", "name"),
+        .select("name slug price images badge stock categories")
+        .populate("category", "name")
+        .populate("categories", "name"),
       Product.countDocuments({ $text: { $search: q }, isActive: true }),
     ]);
 

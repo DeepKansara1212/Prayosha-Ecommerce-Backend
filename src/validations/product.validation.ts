@@ -20,7 +20,7 @@ const productDetailsSchema = z.object({
 
 const objectId = z.string().regex(/^[0-9a-fA-F]{24}$/, "Invalid id");
 
-export const createProductSchema = z.object({
+const productSchema = z.object({
   name: z.string().min(1, "Name is required").max(200),
   sku: z.string().min(1, "SKU is required").max(50).toUpperCase(),
   description: z.string().min(1, "Description is required"),
@@ -29,7 +29,12 @@ export const createProductSchema = z.object({
   comparePrice: z.number().min(0).optional(),
   costPrice: z.number().min(0).optional(),
   video: z.string().url().optional(),
-  category: z.string().min(1, "Category is required"),
+  category: objectId.optional(),
+  categories: z.array(objectId).min(1).optional(),
+  categorySubCategories: z.array(z.object({
+    category: objectId,
+    subCategory: objectId.optional(),
+  })).optional(),
   subCategory: objectId.nullable().optional(),
   tags: z.array(z.string()).default([]),
   chakra: z.string().optional(),
@@ -57,4 +62,9 @@ export const createProductSchema = z.object({
   purposeIds: z.array(objectId).optional(),
 });
 
-export const updateProductSchema = createProductSchema.partial();
+export const createProductSchema = productSchema.refine(
+  (product) => Boolean(product.category || product.categories?.length),
+  { message: "At least one category is required", path: ["categories"] }
+);
+
+export const updateProductSchema = productSchema.partial();

@@ -23,6 +23,11 @@ interface IRatings {
   count: number;
 }
 
+interface IProductCategorySubCategory {
+  category: Types.ObjectId;
+  subCategory?: Types.ObjectId;
+}
+
 export interface IProduct extends Document {
   name: string;
   slug: string;
@@ -35,6 +40,8 @@ export interface IProduct extends Document {
   images: string[];
   video?: string;
   category: Types.ObjectId;
+  categories?: Types.ObjectId[];
+  categorySubCategories?: IProductCategorySubCategory[];
   subCategory?: Types.ObjectId;
   tags: string[];
   chakra?: string;
@@ -76,6 +83,19 @@ const productSchema = new Schema<IProduct>(
     images: { type: [String], validate: [(v: string[]) => v.length <= 6, "Max 6 images allowed"] },
     video: { type: String, trim: true },
     category: { type: Schema.Types.ObjectId, ref: "Category", required: true },
+    categories: { type: [Schema.Types.ObjectId], ref: "Category", default: undefined },
+    categorySubCategories: {
+      type: [
+        new Schema<IProductCategorySubCategory>(
+          {
+            category: { type: Schema.Types.ObjectId, ref: "Category", required: true },
+            subCategory: { type: Schema.Types.ObjectId, ref: "SubCategory" },
+          },
+          { _id: false }
+        ),
+      ],
+      default: [],
+    },
     subCategory: { type: Schema.Types.ObjectId, ref: "SubCategory" },
     tags: { type: [String], default: [] },
     chakra: { type: String },
@@ -134,6 +154,7 @@ const productSchema = new Schema<IProduct>(
 // ─── Indexes ──────────────────────────────────────────────────────────────────
 
 productSchema.index({ category: 1 });
+productSchema.index({ categories: 1 });
 productSchema.index({ purposeTags: 1 });
 productSchema.index({ meaningTags: 1 });
 productSchema.index({ isFeatured: 1, isActive: 1 });
@@ -142,6 +163,9 @@ productSchema.index({ name: "text", description: "text", tags: "text" });
 // ─── Pre-save: auto-generate slug from name ───────────────────────────────────
 
 productSchema.pre("validate", function (next) {
+  if ((!this.categories || this.categories.length === 0) && this.category) {
+    this.categories = [this.category];
+  }
   if (!this.slug && this.name) {
     this.slug = this.name
       .toLowerCase()
