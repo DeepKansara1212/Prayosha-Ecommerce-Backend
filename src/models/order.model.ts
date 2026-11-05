@@ -47,7 +47,11 @@ export interface IOrder extends Document {
   razorpayOrderId?: string;
   razorpayPaymentId?: string;
   razorpayRefundId?: string;
+  razorpayRefundReceipt?: string;
+  refundAttempt?: number;
   refundStatus?: "initiating" | "pending" | "processed" | "failed";
+  refundFailureReason?: string;
+  refundStartedAt?: Date;
   status:
     | "placed"
     | "confirmed"
@@ -152,10 +156,14 @@ const orderSchema = new Schema<IOrder>(
     razorpayOrderId: { type: String },
     razorpayPaymentId: { type: String },
     razorpayRefundId: { type: String },
+    razorpayRefundReceipt: { type: String, select: false },
+    refundAttempt: { type: Number, select: false, default: 0 },
     refundStatus: {
       type: String,
       enum: ["initiating", "pending", "processed", "failed"],
     },
+    refundFailureReason: { type: String, select: false },
+    refundStartedAt: { type: Date, select: false },
     status: {
       type: String,
       enum: [

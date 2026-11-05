@@ -706,10 +706,17 @@ Slug auto-generated from `name` on save.
 | `paymentMethod` | `razorpay` \| `cod` | |
 | `paymentStatus` | pending \| paid \| failed \| refunded | |
 | `razorpayOrderId?`, `razorpayPaymentId?` | string | |
-| `razorpayRefundId?`, `refundStatus?` | string | refundStatus: initiating \| pending \| processed \| failed |
+| `razorpayRefundId?`, `refundStatus?` | string | refundStatus: initiating \| pending \| processed \| failed; failure details are admin-only |
 | `status` | placed \| confirmed \| processing \| shipped \| delivered \| cancelled \| refunded | |
 | `trackingNumber?`, `notes?` | string | |
 | `statusHistory[]` | | status, note?, timestamp |
+
+Cancelling a paid Razorpay order verifies the payment and existing refunds with
+Razorpay before issuing the remaining full-order refund. Failed provider
+responses are recorded for Admin review; network/ambiguous outcomes remain
+pending and must be checked in Razorpay before retrying to avoid duplicate
+refunds. Configure matching Razorpay test/live credentials for the payment
+being refunded.
 
 ---
 

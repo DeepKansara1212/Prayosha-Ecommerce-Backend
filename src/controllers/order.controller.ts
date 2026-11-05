@@ -22,6 +22,259 @@ import { sendOrderConfirmationEmail } from "../utils/email";
 import { FilterQuery, Types } from "mongoose";
 import { IOrder, ORDER_VISIBILITY_FILTER } from "../models/order.model";
 import { ShippingFactory } from "../services/shipping/ShippingFactory";
+import {
+  getCancellationRefundReceipt,
+  getFullRefundAmountInPaise,
+  getRefundFailureDetails,
+  isCancellationRefundReceipt,
+} from "../utils/razorpayRefund";
+
+const REFUND_REQUEST_STALE_AFTER_MS = 2 * 60 * 1000;
+
+interface CancellationRefundOutcome {
+  status: "initiating" | "pending" | "processed" | "failed";
+  refundId?: string;
+  failureReason?: string;
+}
+
+function logRefundFailure(
+  order: IOrder,
+  details: ReturnType<typeof getRefundFailureDetails>,
+  outcome: CancellationRefundOutcome["status"],
+): void {
+  console.error(
+    JSON.stringify({
+      event: "razorpay_refund_error",
+      orderId: order._id.toString(),
+      orderNumber: order.orderNumber,
+      paymentId: order.razorpayPaymentId,
+      statusCode: details.statusCode,
+      code: details.code,
+      reason: details.reason,
+      outcome,
+      timestamp: new Date().toISOString(),
+    }),
+  );
+}
+
+async function requestCancellationRefund(
+  order: IOrder,
+): Promise<CancellationRefundOutcome> {
+  const now = new Date();
+  const staleBefore = new Date(now.getTime() - REFUND_REQUEST_STALE_AFTER_MS);
+  const nextAttempt = (order.refundAttempt || 0) + 1;
+  const receipt = getCancellationRefundReceipt(order._id.toString(), nextAttempt);
+
+  if (
+    ["initiating", "pending"].includes(order.refundStatus ?? "") &&
+    order.refundStartedAt &&
+    order.refundStartedAt > staleBefore
+  ) {
+    return {
+      status: order.refundStatus as "initiating" | "pending",
+      failureReason:
+        order.refundFailureReason ||
+        "Refund request is still being processed. Check Razorpay before retrying.",
+    };
+  }
+
+  const reservation = await Order.findOneAndUpdate(
+    {
+      _id: order._id,
+      paymentStatus: "paid",
+      $or: [
+        { refundStatus: { $exists: false } },
+        { refundStatus: "failed" },
+        {
+          refundStatus: { $in: ["initiating", "pending"] },
+          $or: [
+            { refundStartedAt: { $exists: false } },
+            { refundStartedAt: { $lte: staleBefore } },
+          ],
+        },
+      ],
+    },
+    {
+      $set: {
+        refundStatus: "initiating",
+        refundStartedAt: now,
+        razorpayRefundReceipt: receipt,
+      },
+      $inc: { refundAttempt: 1 },
+      $unset: { refundFailureReason: "", razorpayRefundId: "" },
+    },
+    { new: true },
+  ).select("+refundFailureReason +refundStartedAt +refundAttempt +razorpayRefundReceipt");
+
+  if (!reservation) {
+    const latestOrder = await Order.findById(order._id)
+      .select("+refundFailureReason +refundStartedAt");
+    if (!latestOrder) throw new ApiError(404, "Order not found");
+    if (
+      latestOrder.refundStatus === "processed" ||
+      latestOrder.refundStatus === "pending" ||
+      latestOrder.refundStatus === "initiating"
+    ) {
+      return {
+        status: latestOrder.refundStatus,
+        refundId: latestOrder.razorpayRefundId,
+        failureReason: latestOrder.refundFailureReason,
+      };
+    }
+    throw new ApiError(409, "Refund is already being processed. Refresh the order and try again.");
+  }
+
+  let outcome: CancellationRefundOutcome;
+  try {
+    const razorpay = getRazorpay();
+    const [payment, refundList] = await Promise.all([
+      razorpay.payments.fetch(order.razorpayPaymentId!),
+      razorpay.payments.fetchMultipleRefund(order.razorpayPaymentId!, { count: 100 }),
+    ]);
+
+    const refunds = refundList.items ?? [];
+    const cancellationRefunds = refunds.filter((refund) =>
+      isCancellationRefundReceipt(order._id.toString(), refund.receipt),
+    );
+    const matchingRefund = [...cancellationRefunds]
+      .reverse()
+      .find((refund) => refund.status === "pending" || refund.status === "processed");
+    if (matchingRefund?.status === "pending") {
+      outcome = {
+        status: "pending",
+        refundId: matchingRefund.id,
+        failureReason: "Razorpay has accepted this refund and is still processing it.",
+      };
+    } else if (matchingRefund?.status === "processed") {
+      outcome = { status: "processed", refundId: matchingRefund.id };
+    } else {
+      const targetAmount = getFullRefundAmountInPaise(order.total);
+      const paymentAmount = Number(payment.amount);
+      const refundedAmount = Math.max(
+        payment.status === "refunded" ? paymentAmount : 0,
+        Number(payment.amount_refunded ?? 0),
+        refunds
+          .filter((refund) => refund.status === "processed")
+          .reduce((sum, refund) => sum + Number(refund.amount ?? 0), 0),
+      );
+
+      if (!Number.isFinite(paymentAmount) || !Number.isFinite(refundedAmount)) {
+        throw new ApiError(502, "Razorpay returned invalid payment/refund amounts.");
+      }
+
+      if (refundedAmount >= targetAmount) {
+        const latestProcessedRefund = [...refunds]
+          .reverse()
+          .find((refund) => refund.status === "processed");
+        outcome = {
+          status: "processed",
+          refundId: matchingRefund?.id || latestProcessedRefund?.id,
+        };
+      } else {
+        const pendingRefund = refunds.find((refund) => refund.status === "pending");
+        if (pendingRefund) {
+          outcome = {
+            status: "pending",
+            refundId: pendingRefund.id,
+            failureReason:
+              "Another refund for this payment is still processing. Verify it in Razorpay before retrying.",
+          };
+        } else if (!payment.captured || !["captured", "refunded"].includes(payment.status)) {
+          throw new ApiError(
+            409,
+            `Razorpay payment is not captured (current status: ${payment.status}).`,
+          );
+        } else if (payment.currency !== "INR") {
+          throw new ApiError(
+            409,
+            `Cannot automatically refund a ${payment.currency} payment using this INR order.`,
+          );
+        } else if (paymentAmount < targetAmount) {
+          throw new ApiError(
+            409,
+            "The Razorpay payment amount is less than the order total. Reconcile the payment before refunding.",
+          );
+        } else {
+          const amount = Math.min(targetAmount - refundedAmount, paymentAmount - refundedAmount);
+          if (amount <= 0) {
+            throw new ApiError(
+              409,
+              "No refundable balance remains for this order. Check the existing refunds in Razorpay.",
+            );
+          }
+          const refund = await razorpay.payments.refund(
+            order.razorpayPaymentId!,
+            {
+              amount,
+              receipt,
+              notes: { orderNumber: order.orderNumber },
+            },
+          );
+          outcome = {
+            status: refund.status,
+            refundId: refund.id,
+            ...(refund.status === "failed"
+              ? { failureReason: "Razorpay marked the refund as failed. Check the payment in Razorpay." }
+              : {}),
+          };
+          if (refund.status === "failed") {
+            logRefundFailure(
+              order,
+              getRefundFailureDetails(new Error(outcome.failureReason)),
+              "failed",
+            );
+          }
+        }
+      }
+    }
+  } catch (error) {
+    const details = getRefundFailureDetails(error);
+    outcome = {
+      status: details.definite ? "failed" : "pending",
+      failureReason: details.definite
+        ? details.reason
+        : `Refund outcome is unconfirmed: ${details.reason}. Check Razorpay before retrying.`,
+    };
+    logRefundFailure(order, details, outcome.status);
+  }
+
+  const refundUpdate: Record<string, unknown> = {
+    refundStatus: outcome.status,
+    refundStartedAt: outcome.status === "pending" ? new Date() : null,
+    ...(outcome.status === "processed" ? { paymentStatus: "refunded" } : {}),
+    ...(outcome.refundId ? { razorpayRefundId: outcome.refundId } : {}),
+    ...(outcome.failureReason
+      ? { refundFailureReason: outcome.failureReason }
+      : {}),
+  };
+  const savedOrder = await Order.findOneAndUpdate(
+    { _id: order._id, refundStatus: "initiating" },
+    {
+      $set: refundUpdate,
+      ...(!outcome.failureReason
+        ? { $unset: { refundFailureReason: "" } }
+        : {}),
+    },
+    { new: true },
+  ).select("+refundFailureReason +refundStartedAt");
+
+  if (savedOrder) {
+    return {
+      status: savedOrder.refundStatus || outcome.status,
+      refundId: savedOrder.razorpayRefundId || outcome.refundId,
+      failureReason: savedOrder.refundFailureReason,
+    };
+  }
+
+  const latestOrder = await Order.findById(order._id)
+    .select("+refundFailureReason +refundStartedAt");
+  if (!latestOrder) throw new ApiError(404, "Order not found");
+  return {
+    status: latestOrder.refundStatus || outcome.status,
+    refundId: latestOrder.razorpayRefundId || outcome.refundId,
+    failureReason: latestOrder.refundFailureReason || outcome.failureReason,
+  };
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -741,19 +994,34 @@ export const handleRazorpayWebhook = asyncHandler(
     }
     if (event === "refund.processed" || event === "refund.failed") {
       const refund = req.body?.payload?.refund?.entity as
-        | { id?: string; payment_id?: string; status?: string }
+        | {
+            id?: string;
+            payment_id?: string;
+            status?: string;
+            receipt?: string;
+            error_description?: string;
+          }
         | undefined;
 
       if (refund?.payment_id && refund.id) {
         const order = await Order.findOne({
           razorpayPaymentId: refund.payment_id,
-          refundStatus: { $in: ["initiating", "pending"] },
-        });
-        if (order) {
+        }).select("+refundFailureReason +refundStartedAt +razorpayRefundReceipt");
+        if (
+          order &&
+          (order.razorpayRefundId === refund.id ||
+            refund.receipt === order.razorpayRefundReceipt ||
+            (!order.razorpayRefundReceipt &&
+              refund.receipt === getCancellationRefundReceipt(order._id.toString())))
+        ) {
           const processed = event === "refund.processed";
           order.razorpayRefundId = refund.id;
           order.refundStatus = processed ? "processed" : "failed";
           if (processed) order.paymentStatus = "refunded";
+          order.refundFailureReason = processed
+            ? undefined
+            : refund.error_description || "Razorpay reported that the refund failed.";
+          order.refundStartedAt = undefined;
           await order.save();
         }
       }
@@ -823,7 +1091,9 @@ export const getOrderByNumber = asyncHandler(
 export const getOrderById = asyncHandler(
   async (req: Request, res: Response): Promise<void> => {
     const { id } = req.params
-    const order = await Order.findById(id).populate("user", "name email phone")
+    const order = await Order.findById(id)
+      .select("+refundFailureReason +refundStartedAt")
+      .populate("user", "name email phone")
     if (!order) throw new ApiError(404, "Order not found")
     res.status(200).json(new ApiResponse(200, { order }, "Order fetched"))
   }
@@ -926,7 +1196,8 @@ export const updateOrderStatus = asyncHandler(
     if (status === "shipped" && !trackingNumber)
       throw new ApiError(400, "trackingNumber is required when status is 'shipped'");
 
-    const order = await Order.findById(id);
+    const order = await Order.findById(id)
+      .select("+refundFailureReason +refundStartedAt +refundAttempt +razorpayRefundReceipt");
     if (!order) throw new ApiError(404, "Order not found");
 
     if (status === "refunded" && order.paymentStatus !== "refunded")
@@ -945,108 +1216,63 @@ export const updateOrderStatus = asyncHandler(
     if (
       status === "cancelled" &&
       order.paymentMethod === "razorpay" &&
-      order.paymentStatus === "paid"
+      ["paid", "refunded"].includes(order.paymentStatus)
     ) {
-      if (!order.razorpayPaymentId)
+      if (order.paymentStatus === "paid" && !order.razorpayPaymentId) {
         throw new ApiError(409, "Paid order is missing its Razorpay payment ID");
-
-      let refundStatus = order.refundStatus;
-      if (refundStatus !== "processed" && refundStatus !== "pending" && refundStatus !== "initiating") {
-        const reservedOrder = await Order.findOneAndUpdate(
-          {
-            _id: order._id,
-            paymentStatus: "paid",
-            $or: [
-              { refundStatus: { $exists: false } },
-              { refundStatus: "failed" },
-            ],
-          },
-          { $set: { refundStatus: "initiating" } },
-          { new: true }
-        );
-
-        if (!reservedOrder) {
-          const latestOrder = await Order.findById(order._id);
-          if (!latestOrder)
-            throw new ApiError(404, "Order not found");
-          refundStatus = latestOrder.refundStatus;
-          if (!["processed", "pending", "initiating"].includes(refundStatus ?? ""))
-            throw new ApiError(409, "Refund is already being processed");
-        } else {
-          try {
-            const refund = await getRazorpay().payments.refund(
-              order.razorpayPaymentId,
-              {
-                amount: Math.round(order.total * 100),
-                receipt: `cancel_${order._id.toString()}`,
-                notes: { orderNumber: order.orderNumber },
-              }
-            );
-            const updatedRefundOrder = await Order.findOneAndUpdate(
-              { _id: order._id, refundStatus: "initiating" },
-              {
-                $set: {
-                  razorpayRefundId: refund.id,
-                  refundStatus: refund.status,
-                  ...(refund.status === "processed"
-                    ? { paymentStatus: "refunded" }
-                    : {}),
-                },
-              },
-              { new: true }
-            );
-            const latestOrder =
-              updatedRefundOrder ?? (await Order.findById(order._id));
-            if (!latestOrder)
-              throw new ApiError(404, "Order not found");
-            order.razorpayRefundId = latestOrder.razorpayRefundId;
-            order.refundStatus = latestOrder.refundStatus;
-            order.paymentStatus = latestOrder.paymentStatus;
-            refundStatus = latestOrder.refundStatus;
-          } catch (error) {
-            await Order.updateOne(
-              { _id: order._id, refundStatus: "initiating" },
-              { $set: { refundStatus: "failed" } }
-            );
-            throw error;
-          }
-        }
       }
+
+      let outcome: CancellationRefundOutcome = {
+        status: order.refundStatus ?? "failed",
+        refundId: order.razorpayRefundId,
+        failureReason: order.refundFailureReason,
+      };
+
+      if (order.paymentStatus === "refunded") {
+        outcome = { status: "processed", refundId: order.razorpayRefundId };
+      } else if (order.refundStatus !== "processed") {
+        outcome = await requestCancellationRefund(order);
+      }
+
+      const cancellationNote =
+        note ||
+        (outcome.status === "processed"
+          ? "Admin cancelled order; Razorpay refund processed."
+          : outcome.status === "failed"
+            ? "Admin cancelled order; Razorpay refund failed. Check the payment details."
+            : `Admin cancelled order; Razorpay refund ${outcome.status}.`);
+      const update: Record<string, unknown> = {
+        status: "cancelled",
+        ...(trackingNumber ? { trackingNumber } : {}),
+      };
 
       const cancelledOrder = await Order.findOneAndUpdate(
         { _id: order._id },
         {
-          $set: {
-            status: "cancelled",
-            ...(trackingNumber ? { trackingNumber } : {}),
-          },
+          $set: update,
           $push: {
             statusHistory: {
               status: "cancelled",
-              note:
-                note ||
-                `Admin cancelled order; Razorpay refund ${refundStatus ?? "is being processed"}.`,
+              note: cancellationNote,
               timestamp: new Date(),
             },
           },
         },
-        { new: true }
-      );
+        { new: true },
+      ).select("+refundFailureReason +refundStartedAt");
       if (!cancelledOrder) throw new ApiError(404, "Order not found");
-      refundStatus = cancelledOrder.refundStatus;
 
-      res.status(
-        200
-      ).json(
-        new ApiResponse(
-          200,
-          cancelledOrder,
-          refundStatus === "processed"
-            ? "Order cancelled and payment refunded"
-            : refundStatus === "failed"
-              ? "Order cancelled, but Razorpay could not process the refund"
-            : "Order cancelled; Razorpay refund is being processed"
-        )
+      const message =
+        outcome.status === "processed"
+          ? "Order cancelled and payment refunded"
+          : outcome.status === "failed"
+            ? "Order cancelled, but the refund failed. Review the Razorpay error and retry after correcting it."
+            : outcome.status === "initiating"
+              ? "Order cancelled; a refund request is already being processed. Check Razorpay before retrying."
+              : "Order cancelled; the Razorpay refund is pending. Do not retry until its status is confirmed.";
+
+      res.status(200).json(
+        new ApiResponse(200, cancelledOrder, message),
       );
       return;
     }
