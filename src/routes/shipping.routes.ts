@@ -1,6 +1,7 @@
 import { Router, json, type Request } from "express";
 import {
   createShipment,
+  getShiprocketCouriers,
   trackShipmentHandler,
   cancelShipmentHandler,
   downloadLabelHandler,
@@ -35,6 +36,7 @@ export const adminShippingRouter = Router({ mergeParams: true });
 
 adminShippingRouter.use(verifyJWT, verifyAdmin);
 
+adminShippingRouter.get("/:id/shipments/couriers", getShiprocketCouriers);
 adminShippingRouter.post("/:id/shipments", validate(createShipmentSchema), createShipment);
 adminShippingRouter.get("/:id/shipments/track", trackShipmentHandler);
 adminShippingRouter.post("/:id/shipments/tracking-email", resendTrackingEmailHandler);

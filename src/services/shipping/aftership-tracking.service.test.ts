@@ -143,4 +143,17 @@ describe("createShipmentSchema AfterShip validation", () => {
       courierSlug: "anjani-courier",
     }).success).toBe(true);
   });
+
+  it("accepts a ShipRocket courier ID only for ShipRocket shipments", () => {
+    expect(createShipmentSchema.safeParse({
+      provider: "shiprocket",
+      courierCompanyId: 404,
+    }).success).toBe(true);
+    expect(createShipmentSchema.safeParse({
+      provider: "aftership",
+      carrierName: "Anjani Courier",
+      trackingNumber: "ANJ123",
+      courierCompanyId: 404,
+    }).success).toBe(false);
+  });
 });

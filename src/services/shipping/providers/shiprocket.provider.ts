@@ -254,6 +254,21 @@ export class ShiprocketProvider implements IShippingProvider {
     paymentMethod: "cod" | "prepaid",
     declaredValue: number,
   ): Promise<StandardShippingRate> {
+    const rates = await this.calculateShippingRates(
+      items,
+      deliveryPostcode,
+      paymentMethod,
+      declaredValue,
+    );
+    return rates[0];
+  }
+
+  async calculateShippingRates(
+    items: ShippingRateItem[],
+    deliveryPostcode: string,
+    paymentMethod: "cod" | "prepaid",
+    declaredValue: number,
+  ): Promise<StandardShippingRate[]> {
     const pickupPostcode = this.credentials.pickupPostcode?.trim();
     if (!pickupPostcode || !/^\d{6}$/.test(pickupPostcode)) {
       throw new ApiError(
@@ -337,8 +352,7 @@ export class ShiprocketProvider implements IShippingProvider {
       ];
     }).sort((a, b) => a.charge - b.charge);
 
-    const cheapest = rates[0];
-    if (!cheapest) {
+    if (rates.length === 0) {
       throw new ApiError(
         422,
         data.message ||
@@ -346,13 +360,16 @@ export class ShiprocketProvider implements IShippingProvider {
       );
     }
 
-    return {
-      ...cheapest,
-      charge: Math.round(cheapest.charge * 100) / 100,
-    };
+    return rates.map((rate) => ({
+      ...rate,
+      charge: Math.round(rate.charge * 100) / 100,
+    }));
   }
 
-  async createShipment(order: IOrder): Promise<StandardShipmentResult> {
+  async createShipment(
+    order: IOrder,
+    options?: { courierCompanyId?: number },
+  ): Promise<StandardShipmentResult> {
     const user = await User.findById(order.user).select("email");
     const packageDetails = await this.resolveOrderPackage(order.items);
 
@@ -452,6 +469,8 @@ export class ShiprocketProvider implements IShippingProvider {
         const quotedCourierCompanyId = (
           order.shippingMeta as { quotedCourierCompanyId?: number } | undefined
         )?.quotedCourierCompanyId;
+        const courierCompanyId =
+          options?.courierCompanyId ?? quotedCourierCompanyId;
         const result = await this.request<{
           awb_assign_status?: number | string;
           response?: {
@@ -469,8 +488,8 @@ export class ShiprocketProvider implements IShippingProvider {
           method: "POST",
           body: JSON.stringify({
             shipment_id: numericShipmentId,
-            ...(quotedCourierCompanyId
-              ? { courier_id: quotedCourierCompanyId }
+            ...(courierCompanyId
+              ? { courier_id: courierCompanyId }
               : {}),
           }),
         });

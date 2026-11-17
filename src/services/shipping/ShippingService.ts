@@ -2,7 +2,7 @@ import { ApiError } from "../../utils/ApiError";
 import { IOrder, Order } from "../../models/order.model";
 import { ShippingProvider } from "../../models/shippingProvider.model";
 import { ShippingFactory } from "./ShippingFactory";
-import { StandardTrackingResult } from "./types";
+import { StandardShippingRate, StandardTrackingResult } from "./types";
 import {
   AfterShipTrackingData,
   getAfterShipTrackingUrl,
@@ -53,6 +53,7 @@ export const ShippingService = {
     providerSlug: string,
     adminUserId?: string,
     trackingInput?: { carrierName: string; trackingNumber: string; courierSlug?: string },
+    courierCompanyId?: number,
   ): Promise<IOrder> {
     if (providerSlug === "aftership") {
       if (!trackingInput) {
@@ -86,6 +87,23 @@ export const ShippingService = {
     }
 
     const provider = await ShippingFactory.getProvider(providerSlug);
+    if (courierCompanyId !== undefined) {
+      if (providerSlug !== "shiprocket" || !provider.calculateShippingRates) {
+        throw new ApiError(400, "Manual courier selection is only available for Shiprocket");
+      }
+      const availableCouriers = await provider.calculateShippingRates(
+        order.items,
+        order.shippingAddress.pincode,
+        order.paymentMethod === "cod" ? "cod" : "prepaid",
+        order.subtotal,
+      );
+      if (!availableCouriers.some((courier) => courier.courierCompanyId === courierCompanyId)) {
+        throw new ApiError(
+          400,
+          "The selected courier is no longer available for this order. Refresh the courier list and try again.",
+        );
+      }
+    }
 
     const reservation = await Order.updateOne(
       {
@@ -109,7 +127,10 @@ export const ShippingService = {
 
     let result: Awaited<ReturnType<typeof provider.createShipment>>;
     try {
-      result = await provider.createShipment(order);
+      result = await provider.createShipment(
+        order,
+        courierCompanyId === undefined ? undefined : { courierCompanyId },
+      );
     } catch (err) {
       logShippingEvent("shipment_failed", {
         provider: providerSlug,
@@ -178,6 +199,29 @@ export const ShippingService = {
     });
 
     return order;
+  },
+
+  async getShiprocketCouriers(order: IOrder): Promise<StandardShippingRate[]> {
+    if (order.shippingProvider) {
+      throw new ApiError(400, "This order already has a shipping provider");
+    }
+    if (!["confirmed", "processing"].includes(order.status)) {
+      throw new ApiError(400, "Order must be in confirmed or processing status to ship");
+    }
+    if (order.paymentMethod === "razorpay" && order.paymentStatus !== "paid") {
+      throw new ApiError(400, "An unpaid Razorpay order cannot be shipped");
+    }
+
+    const provider = await ShippingFactory.getProvider("shiprocket");
+    if (!provider.calculateShippingRates) {
+      throw new ApiError(503, "ShipRocket courier options are unavailable");
+    }
+    return provider.calculateShippingRates(
+      order.items,
+      order.shippingAddress.pincode,
+      order.paymentMethod === "cod" ? "cod" : "prepaid",
+      order.subtotal,
+    );
   },
 
   async cancelShipment(order: IOrder, adminUserId?: string): Promise<IOrder> {

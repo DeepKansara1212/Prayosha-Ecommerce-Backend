@@ -43,13 +43,22 @@ export interface StandardShippingRate {
 
 export interface IShippingProvider {
   readonly slug: string;
+  calculateShippingRates?(
+    items: ShippingRateItem[],
+    deliveryPostcode: string,
+    paymentMethod: "cod" | "prepaid",
+    declaredValue: number,
+  ): Promise<StandardShippingRate[]>;
   calculateShippingRate?(
     items: ShippingRateItem[],
     deliveryPostcode: string,
     paymentMethod: "cod" | "prepaid",
     declaredValue: number,
   ): Promise<StandardShippingRate>;
-  createShipment(order: IOrder): Promise<StandardShipmentResult>;
+  createShipment(
+    order: IOrder,
+    options?: { courierCompanyId?: number },
+  ): Promise<StandardShipmentResult>;
   cancelShipment(order: IOrder): Promise<void>;
   trackShipment(order: IOrder): Promise<StandardTrackingResult>;
   downloadLabel(order: IOrder): Promise<{ labelUrl: string }>;

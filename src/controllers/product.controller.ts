@@ -13,6 +13,15 @@ import { deleteFromCloudinary } from "../middleware/upload";
 import { FilterQuery, Types } from "mongoose";
 import { parseWeightInKilograms } from "../services/shipping/weight";
 
+function rudrakshaFacePattern(face: string): RegExp {
+  const trimmedFace = face.trim();
+  const mukhiMatch = trimmedFace.match(/^(\d+)\s*mukhi$/i);
+  const label = mukhiMatch
+    ? `(?:${mukhiMatch[1]}|${mukhiMatch[1]}\\s*mukhi)`
+    : trimmedFace.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`^${label}$`, "i");
+}
+
 function validateShippingWeights(value: unknown): void {
   if (!value || typeof value !== "object") return;
   const shipping = value as Record<string, unknown>;
@@ -120,6 +129,7 @@ export const getProducts = asyncHandler(
       purpose,
       meaning,
       subCategory,
+      rudrakshaFaces,
       inStock,
       page = "1",
       limit = "12",
@@ -129,6 +139,9 @@ export const getProducts = asyncHandler(
     const limitNum = Math.min(48, Math.max(1, parseInt(limit, 10) || 12));
 
     const filter: FilterQuery<IProduct> = { isActive: true };
+    const taxonomyFilters: FilterQuery<IProduct>[] = [];
+    let selectedCategoryId: Types.ObjectId | undefined;
+    let selectedCategoryName: string | undefined;
 
     // Category filter — accepts slug. Storefront nav links to categories that
     // may not be created yet, so an unknown slug is a legitimate empty result,
@@ -145,7 +158,15 @@ export const getProducts = asyncHandler(
         );
         return;
       }
-      filter.$or = [{ categories: cat._id }, { category: cat._id }];
+      selectedCategoryId = cat._id;
+      selectedCategoryName = cat.name;
+      taxonomyFilters.push({
+        $or: [
+          { categories: cat._id },
+          { category: cat._id },
+          { "categorySubCategories.category": cat._id },
+        ],
+      });
     }
 
     // Full-text search
@@ -223,7 +244,55 @@ export const getProducts = asyncHandler(
         );
         return;
       }
-      filter.subCategory = new Types.ObjectId(subCategory);
+
+      const selectedSubCategoryId = new Types.ObjectId(subCategory);
+      const rudrakshaCategory =
+        selectedCategoryId &&
+        selectedCategoryName?.trim().toLowerCase() === "rudraksha";
+      const selectedSubCategory = rudrakshaCategory
+        ? await SubCategory.findOne({
+            _id: selectedSubCategoryId,
+            parentCategory: selectedCategoryId,
+            isActive: true,
+          }).select("name")
+        : null;
+      const selectedFacePattern = selectedSubCategory?.name
+        ? rudrakshaFacePattern(selectedSubCategory.name)
+        : undefined;
+      taxonomyFilters.push({
+        $or: selectedCategoryId
+          ? [
+              {
+                categorySubCategories: {
+                  $elemMatch: {
+                    category: selectedCategoryId,
+                    subCategory: selectedSubCategoryId,
+                  },
+                },
+              },
+              {
+                category: selectedCategoryId,
+                subCategory: selectedSubCategoryId,
+              },
+              {
+                categories: selectedCategoryId,
+                subCategory: selectedSubCategoryId,
+              },
+              ...(selectedFacePattern
+                ? [{ rudrakshaFaces: selectedFacePattern }]
+                : []),
+            ]
+          : [
+              { subCategory: selectedSubCategoryId },
+              { "categorySubCategories.subCategory": selectedSubCategoryId },
+            ],
+      });
+    }
+
+    if (taxonomyFilters.length > 0) filter.$and = taxonomyFilters;
+
+    if (rudrakshaFaces) {
+      filter.rudrakshaFaces = rudrakshaFacePattern(rudrakshaFaces);
     }
 
     // In-stock only

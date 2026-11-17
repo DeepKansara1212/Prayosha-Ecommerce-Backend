@@ -37,11 +37,13 @@ export const createShipment = asyncHandler(
       carrierName,
       courierSlug,
       trackingNumber,
+      courierCompanyId,
     } = req.body as {
       provider: string;
       carrierName?: string;
       courierSlug?: string;
       trackingNumber?: string;
+      courierCompanyId?: number;
     };
     const order = await loadOrder(req.params.id);
 
@@ -52,6 +54,7 @@ export const createShipment = asyncHandler(
       provider === "aftership" && carrierName && trackingNumber
         ? { carrierName, trackingNumber, courierSlug }
         : undefined,
+      courierCompanyId,
     );
 
     if (provider === "aftership") {
@@ -142,6 +145,16 @@ export const resendTrackingEmailHandler = asyncHandler(
         "Tracking email sent",
       ),
     );
+  },
+);
+
+export const getShiprocketCouriers = asyncHandler(
+  async (req: Request, res: Response): Promise<void> => {
+    const order = await loadOrder(req.params.id);
+    const couriers = await ShippingService.getShiprocketCouriers(order);
+    res
+      .status(200)
+      .json(new ApiResponse(200, { couriers }, "ShipRocket couriers fetched"));
   },
 );
 

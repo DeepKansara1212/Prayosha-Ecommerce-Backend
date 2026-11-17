@@ -97,7 +97,9 @@ describe("ShiprocketProvider.createShipment", () => {
       email: "shiprocket-test@example.com",
       password: "password",
     });
-    const result = await provider.createShipment(makeOrder());
+    const order = makeOrder();
+    order.shippingMeta = { quotedCourierCompanyId: 303 };
+    const result = await provider.createShipment(order, { courierCompanyId: 404 });
 
     expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
       "https://apiv2.shiprocket.in/v1/external/auth/login",
@@ -108,6 +110,7 @@ describe("ShiprocketProvider.createShipment", () => {
     ]);
     expect(JSON.parse(fetchMock.mock.calls[2][1]?.body as string)).toEqual({
       shipment_id: 202,
+      courier_id: 404,
     });
     expect(JSON.parse(fetchMock.mock.calls[3][1]?.body as string)).toEqual({
       shipment_id: [202],
@@ -171,6 +174,39 @@ describe("ShiprocketProvider.createShipment", () => {
         cod: "0",
         declared_value: "100",
       });
+  });
+
+  it("returns all serviceable couriers in ascending rate order", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response({ token: "test-token" }))
+      .mockResolvedValueOnce(response({
+        data: {
+          available_courier_companies: [
+            { courier_company_id: 303, courier_name: "Higher Rate", rate: 128.5 },
+            { courier_company_id: 404, courier_name: "Lowest Rate", rate: 74.25 },
+          ],
+        },
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+    mockProductLookup();
+
+    const provider = new ShiprocketProvider({
+      email: "shiprocket-options-test@example.com",
+      password: "password",
+      pickupPostcode: "560001",
+    });
+    const order = makeOrder();
+    const result = await provider.calculateShippingRates(
+      order.items,
+      order.shippingAddress.pincode,
+      "prepaid",
+      order.subtotal,
+    );
+
+    expect(result).toEqual([
+      { charge: 74.25, courierCompanyId: 404, courierName: "Lowest Rate" },
+      { charge: 128.5, courierCompanyId: 303, courierName: "Higher Rate" },
+    ]);
   });
 
   it("requires a configured pickup postcode before requesting a live rate", async () => {
